@@ -4,3 +4,5 @@ extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autoli
 rootProject.name = 'MobileApp'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')
+include ':react-native-android-open-settings'
+project(':react-native-android-open-settings').projectDir = new File(settingsDir, '../node_modules/react-native-android-open-settings/android')
