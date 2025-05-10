@@ -8,55 +8,65 @@ import {
   StyleSheet,
   TouchableWithoutFeedback,
 } from 'react-native';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage'; // ✅ Store & get email
 
 const UpdateOtpFlowModal = ({ visible, onClose, onOtpSuccess, skipOtp = false }) => {
   const [step, setStep] = useState(1);
   const [otp, setOtp] = useState('');
-  const [attempts, setAttempts] = useState(0);
-  const [otpError, setOtpError] = useState(false);
-  const correctOtp = '123456';
+  const [otpError, setOtpError] = useState('');
 
   useEffect(() => {
     if (visible && skipOtp) {
-      setStep(3); // Go straight to Thank You screen
+      setStep(3); // Skip OTP if allowed
     } else if (visible) {
-      setStep(1); // Start OTP flow normally
+      setStep(1);
     }
   }, [visible, skipOtp]);
 
   const reset = () => {
     setOtp('');
-    setAttempts(0);
-    setOtpError(false);
+    setOtpError('');
     setStep(1);
     onClose();
   };
 
-  const handleVerify = () => {
-    if (otp === correctOtp) {
-      setOtpError(false);
-      setStep(3);
-      onOtpSuccess();
-    } else {
-      const nextAttempt = attempts + 1;
-      if (nextAttempt >= 2) {
-        setAttempts(0);
-        setOtp('');
-        setStep(1);
-        setOtpError(false);
-      } else {
-        setAttempts(nextAttempt);
-        setOtpError(true);
+  const handleVerify = async () => {
+    try {
+      const email = await AsyncStorage.getItem('email');
+      if (!email) {
+        setOtpError('Missing email. Try again.');
+        return;
       }
+  
+      const response = await axios.post('http://localhost:5000/api/auth/verify-otp', {
+        email: email,
+        otp: otp,
+        purpose: 'login',
+      });
+  
+      if (response.status === 200) {
+        console.log('OTP verified successfully!');
+  
+        const token = response.data.token; // ✅ Get the token from response
+        await AsyncStorage.setItem('token', token); // ✅ Save token to AsyncStorage
+  
+        setStep(3);
+        onOtpSuccess(); // ✅ Navigate to Dashboard
+      }
+    } catch (err) {
+      console.error('OTP verification failed:', err?.response?.data?.error || err.message);
+      setOtpError('Incorrect OTP. Please try again.');
     }
   };
+  
 
   const renderStep = () => {
     if (step === 1 && !skipOtp) {
       return (
         <View style={styles.box}>
           <Text style={styles.message}>
-            We have sent a one-time password to your email. Enter it in the password box to continue.
+            We have sent a one-time password to your email. Enter it to continue.
           </Text>
           <TouchableOpacity style={styles.button} onPress={() => setStep(2)}>
             <Text style={styles.buttonText}>Ok</Text>
@@ -71,12 +81,12 @@ const UpdateOtpFlowModal = ({ visible, onClose, onOtpSuccess, skipOtp = false })
           <Text style={styles.title}>Enter Your OTP</Text>
           <TextInput
             style={styles.input}
-            placeholder="Enter your one time password"
+            placeholder="Enter your one-time password"
             keyboardType="numeric"
             value={otp}
             onChangeText={setOtp}
           />
-          {otpError && <Text style={styles.error}>Incorrect OTP. Try again.</Text>}
+          {otpError ? <Text style={styles.error}>{otpError}</Text> : null}
           <TouchableOpacity style={styles.button} onPress={handleVerify}>
             <Text style={styles.buttonText}>Verify</Text>
           </TouchableOpacity>

@@ -51,7 +51,7 @@ const CustomDrawer = props => {
 
           <TouchableOpacity
             style={styles.menuItem}
-            onPress={() => props.navigation.navigate('Report')}>
+            onPress={() => props.navigation.navigate('History')}>
             <Image
               source={require('../assets/document.png')}
               style={styles.icon}

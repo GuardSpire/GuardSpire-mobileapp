@@ -11,19 +11,38 @@ import {
   Image,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage'; // ✅ Added for storing email
 import UpdateOtpFlowModal from '../modals/UpdateOtpFlowModal';
+import ForgotPasswordModalController from '../modals/ForgotPasswordModalController'; // ✅ Import Forgot Password Modal
 
 const SignInScreen = ({ navigation }) => {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showOtpModal, setShowOtpModal] = useState(false);
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false); // ✅ State for Forgot Password Modal
+  const [error, setError] = useState('');
 
-  const handleSignIn = () => {
-    console.log('Sign In pressed');
-    setShowOtpModal(true); // ✅ Show OTP modal
+  const handleSignIn = async () => {
+    setError('');
+    try {
+      const response = await axios.post('http://localhost:5000/api/auth/signin', {
+        email,
+        password,
+      });
+  
+      if (response.status === 200) {
+        await AsyncStorage.setItem('email', email); // ✅ Save email
+        setShowOtpModal(true); // ✅ Open OTP modal
+      }
+    } catch (err) {
+      const msg = err?.response?.data?.error || 'Sign-in failed. Please try again.';
+      console.error('Sign in failed:', msg);
+      setError(msg);
+    }
   };
-
+  
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -68,6 +87,19 @@ const SignInScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
+        {/* Forgot Password Link */}
+        <TouchableOpacity
+          style={styles.forgotPasswordLink}
+          onPress={() => setShowForgotPasswordModal(true)} // ✅ Open Forgot Password Modal
+        >
+          <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+        </TouchableOpacity>
+
+        {/* Error message */}
+        {error ? (
+          <Text style={styles.errorText}>{error}</Text>
+        ) : null}
+
         {/* Sign In */}
         <TouchableOpacity style={styles.signInButton} onPress={handleSignIn}>
           <Text style={styles.signInText}>Sign In</Text>
@@ -81,15 +113,21 @@ const SignInScreen = ({ navigation }) => {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* ✅ OTP Modal */}
+      {/* OTP Modal */}
       <UpdateOtpFlowModal
         visible={showOtpModal}
         onClose={() => setShowOtpModal(false)}
         skipThankYou={true}
         onOtpSuccess={() => {
           console.log('OTP verified. Navigating to Dashboard...');
-          navigation.navigate('Main', { screen: 'Dashboard' }); // ✅ Drawer > Dashboard
+          navigation.navigate('Main', { screen: 'Dashboard' }); // ✅ Move to Dashboard
         }}
+      />
+
+      {/* Forgot Password Modal */}
+      <ForgotPasswordModalController
+        visible={showForgotPasswordModal}
+        onClose={() => setShowForgotPasswordModal(false)} // ✅ Close Forgot Password Modal
       />
     </KeyboardAvoidingView>
   );
@@ -139,6 +177,17 @@ const styles = StyleSheet.create({
     height: 45,
     fontSize: 16,
   },
+  forgotPasswordLink: {
+    alignSelf: 'flex-start', // Align to the left
+    marginLeft: 240, // Add some spacing from the left edge
+    marginBottom: 60,
+    marginTop: -5,
+  },
+  forgotPasswordText: {
+    color: '#04366D',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
   signInButton: {
     backgroundColor: '#04366D',
     paddingVertical: 12,
@@ -159,6 +208,11 @@ const styles = StyleSheet.create({
   signUpBold: {
     color: '#04366D',
     fontWeight: 'bold',
+  },
+  errorText: {
+    color: 'red',
+    fontSize: 13,
+    marginBottom: 10,
   },
 });
 
