@@ -129,6 +129,7 @@ const styles = StyleSheet.create({
     letterSpacing: 7,
     marginBottom: 10,
     fontFamily: 'Poppins-Bold',
+    color: 'black',
   },
   input: {
     width: '100%',

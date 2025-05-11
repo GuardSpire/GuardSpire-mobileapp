@@ -112,7 +112,10 @@ dependencies {
     implementation("com.facebook.react:react-android")
     implementation project(':react-native-android-open-settings')
 
-
+    // Add the react-native-push-notification dependency
+    implementation(project(":react-native-push-notification")) {
+        exclude group: 'com.android.support', module: 'support-compat'
+    }
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

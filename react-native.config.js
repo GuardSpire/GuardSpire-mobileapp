@@ -1,3 +1,11 @@
 module.exports = {
-  assets: ['./src/assets/fonts/'], // Ensure this path is correct
+  assets: ['./src/assets/fonts/'],
+  dependencies: {
+    'react-native-permissions': {
+      platforms: {
+        android: null,
+        ios: null,
+      },
+    },
+  },
 };

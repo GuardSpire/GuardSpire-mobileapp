@@ -12,6 +12,7 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
 
+
 import com.levelasquez.androidopensettings.AndroidOpenSettingsPackage
 import com.mobileapp.NotificationAccessCheckerPackage
 import com.mobileapp.NotificationListenerPackage // Import NotificationListenerPackage
@@ -26,8 +27,6 @@ class MainApplication : Application(), ReactApplication {
         object : DefaultReactNativeHost(this) {
             override fun getPackages(): List<ReactPackage> =
                 PackageList(this).packages.apply {
-                    add(AndroidOpenSettingsPackage())
-                    add(NotificationAccessCheckerPackage())
                     add(NotificationListenerPackage()) // Keep your existing NotificationListenerPackage
                     
                     // Add only the access checker module
@@ -48,7 +47,7 @@ class MainApplication : Application(), ReactApplication {
 
             override fun getJSMainModuleName(): String = "index"
             override fun getUseDeveloperSupport(): Boolean = BuildConfig.DEBUG
-            override val isNewArchEnabled: Boolean = BuildConfig.IS_NEW_ARCHITECTURE_ENABLED
+            override val isNewArchEnabled: Boolean = false
             override val isHermesEnabled: Boolean = BuildConfig.IS_HERMES_ENABLED
         }
 
@@ -58,8 +57,6 @@ class MainApplication : Application(), ReactApplication {
     override fun onCreate() {
         super.onCreate()
         SoLoader.init(this, OpenSourceMergedSoMapping)
-        if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
-            load()
-        }
+          // Fabric & TurboModules are disabled, so skip loading
     }
 }

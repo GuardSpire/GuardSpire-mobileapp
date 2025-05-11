@@ -1,0 +1,9 @@
+{
+  "java.project.import.exclusions": [
+    "**/node_modules/**",
+    "**/build/**",
+    "**/.gradle/**"
+  ],
+  "java.project.referencedLibraries": [],
+  "java.configuration.updateBuildConfiguration": "automatic"
+}

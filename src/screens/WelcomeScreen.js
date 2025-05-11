@@ -78,13 +78,15 @@ const styles = StyleSheet.create({
     letterSpacing: 7,
     marginBottom: 15,
     fontFamily: 'Poppins-Bold',
+    color: 'black',
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 13,
     textAlign: 'center',
     marginBottom: 40,
     paddingHorizontal: 10,
     fontFamily: 'Poppins-Medium',
+    color: 'black',
   },
   buttonContainer: {
     alignItems: 'center',
@@ -102,7 +104,7 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 18,
     fontFamily: 'Poppins-SemiBold',
-    color: '', // Set default text color
+    color: 'black', 
   },
   buttonTextActive: {
     color: 'white',

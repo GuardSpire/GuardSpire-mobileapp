@@ -25,39 +25,25 @@ const App = () => {
   const [currentNotification, setCurrentNotification] = useState(null);
 
   useEffect(() => {
-    const handleSpamNotification = (notification) => {
-      if (notification.isSpam) {
-        setCurrentNotification(notification);
+    // Register real-time result callback from NotificationService
+    const handleSpamNotification = (result) => {
+      if (result?.show_warning) {
+        setCurrentNotification({
+          ...result,
+          isSpam: true
+        });
         setShowWarning(true);
       }
     };
 
-    // Modified initialization to work with existing NotificationService
-    const originalHandleNotification = NotificationService.handleNotification;
-    NotificationService.handleNotification = (notification) => {
-      originalHandleNotification(notification); // Keep original processing
-      handleSpamNotification(notification); // Add our spam detection
-    };
+    NotificationService.registerPopupTrigger(handleSpamNotification);
 
-    // Temporary test - remove in production
-    const testTimer = setInterval(() => {
-      setCurrentNotification({
-        isSpam: true,
-        message: "Test spam notification",
-        url: "http://test-malicious.com",
-        timestamp: new Date().toISOString()
-      });
-      setShowWarning(true);
-    }, 30000);
-    
     return () => {
-      clearInterval(testTimer);
-      // Restore original handler
-      NotificationService.handleNotification = originalHandleNotification;
+      NotificationService.registerPopupTrigger(null);
     };
   }, []);
 
-  const handleNavigationStateChange = state => {
+  const handleNavigationStateChange = (state) => {
     if (!state) return;
     const currentRoute = getActiveRouteName(state);
     if (Platform.OS === 'android') {
@@ -65,12 +51,12 @@ const App = () => {
         ['Welcome', 'SignIn', 'SignUp'].includes(currentRoute)
           ? 'white'
           : 'black',
-        false,
+        false
       );
     }
   };
 
-  const getActiveRouteName = state => {
+  const getActiveRouteName = (state) => {
     const route = state.routes[state.index];
     if (route.state) return getActiveRouteName(route.state);
     return route.name;
@@ -79,7 +65,7 @@ const App = () => {
   const DrawerNavigator = () => (
     <Drawer.Navigator
       initialRouteName="Dashboard"
-      drawerContent={props => <CustomDrawer {...props} />}
+      drawerContent={(props) => <CustomDrawer {...props} />}
       screenOptions={{ headerShown: false }}>
       <Drawer.Screen name="Dashboard" component={DashboardScreen} />
       <Drawer.Screen name="ManualScanner" component={ManualScannerScreen} />
@@ -104,9 +90,9 @@ const App = () => {
           <Stack.Screen name="Main" component={DrawerNavigator} />
         </Stack.Navigator>
       </NavigationContainer>
-      
-      <WarningPopup 
-        visible={showWarning} 
+
+      <WarningPopup
+        visible={showWarning}
         onClose={() => setShowWarning(false)}
         notificationData={currentNotification}
       />
