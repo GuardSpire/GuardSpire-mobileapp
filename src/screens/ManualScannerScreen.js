@@ -1,29 +1,34 @@
-import React, {useState, useRef} from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
-import Svg, {Circle} from 'react-native-svg';
+import { StyleSheet } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import TopNavBar from '../components/TopNavBar';
 import BottomNavBar from '../components/BottomNavBar';
 
-const ManualScannerScreen = ({navigation}) => {
+const ManualScannerScreen = ({ navigation }) => {
   const [scanText, setScanText] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanComplete, setScanComplete] = useState(false);
   const [threatLevel, setThreatLevel] = useState(null);
+  const [lastScanId, setLastScanId] = useState(null);
   const textInputRef = useRef(null);
 
-  // Simulate Scan Process
-  const handleScan = () => {
-    if (!scanText) {return;}
+  const handleScan = async () => {
+    if (!scanText) return;
+
     setIsScanning(true);
     setScanProgress(0);
     setScanComplete(false);
@@ -32,38 +37,67 @@ const ManualScannerScreen = ({navigation}) => {
     const interval = setInterval(() => {
       progress += 0.1;
       setScanProgress(progress);
-
-      if (progress >= 1) {
-        clearInterval(interval);
-        setIsScanning(false);
-        setScanComplete(true);
-
-        // Simulating scan results
-        setThreatLevel({
-          type: 'Phishing Attack',
-          level: 'High',
-          status: 'Critical',
-          percentage: '100%',
-        });
-      }
     }, 300);
+
+    try {
+      const token = await AsyncStorage.getItem('token');
+      
+      const response = await axios.post(
+        'http://localhost:5000/api/scan/manual',
+        { input: scanText },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      const data = response.data;
+      setLastScanId(data.scan_id);
+
+      clearInterval(interval);
+      setIsScanning(false);
+      setScanProgress(1);
+      setScanComplete(true);
+
+      const threat = data.combined_threat || data.text_analysis || {};
+      const normalizedThreatCategory = threat.category || 'Stable';
+
+      setThreatLevel({
+        type: normalizedThreatCategory === 'Critical' ? 'Scam Alert' :
+              normalizedThreatCategory === 'Suspicious' ? 'Potential Threat' : 'Legitimate',
+        level: normalizedThreatCategory === 'Critical' ? 'High' :
+               normalizedThreatCategory === 'Suspicious' ? 'Medium' : 'Low',
+        status: normalizedThreatCategory,
+        percentage: parseFloat(threat.confidence?.toString().replace('%', '') || '0').toFixed(0),
+        description: threat.description || 'No description provided.',
+        indicators: threat.indicators || [],
+        actions: threat.actions || []
+      });
+
+    } catch (error) {
+      clearInterval(interval);
+      setIsScanning(false);
+      setScanComplete(false);
+      Alert.alert('Error', 'Scan failed. Please try again.');
+      console.error('Scan failed:', error.message);
+    }
+  };
+
+  const getThreatColor = (level) => {
+    if (level === 'High') return '#FF0000';
+    if (level === 'Medium') return '#FFD700';
+    return '#4CAF50';
   };
 
   return (
     <KeyboardAvoidingView
-      style={{flex: 1}}
+      style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.container}>
-        {/* Top Navigation Bar */}
         <TopNavBar navigation={navigation} />
 
         <ScrollView contentContainerStyle={styles.contentContainer}>
-          {/* Input Box */}
-          <View
-            style={[
-              styles.inputBox,
-              {borderColor: scanText ? '#04366D' : '#D3D3D3'},
-            ]}>
+          <View style={[
+            styles.inputBox,
+            { borderColor: scanText ? '#04366D' : '#D3D3D3' },
+          ]}>
             <TextInput
               ref={textInputRef}
               style={[styles.input, isScanning && styles.inputScanning]}
@@ -72,7 +106,7 @@ const ManualScannerScreen = ({navigation}) => {
               value={scanText}
               onChangeText={setScanText}
               editable={!isScanning}
-              onFocus={() => textInputRef.current.focus()} // Ensure the TextInput is focused
+              onFocus={() => textInputRef.current.focus()}
             />
             {isScanning && (
               <View style={styles.scanBox}>
@@ -81,13 +115,11 @@ const ManualScannerScreen = ({navigation}) => {
             )}
           </View>
 
-          {/* Scan Button */}
           <TouchableOpacity style={styles.scanButton} onPress={handleScan}>
             <Text style={styles.scanText}>Scan</Text>
           </TouchableOpacity>
 
-          {/* Scan Results */}
-          {scanComplete && (
+          {scanComplete && threatLevel && (
             <View style={styles.resultsBox}>
               <Text style={styles.statusTitle}>Status</Text>
               <View style={styles.card}>
@@ -98,84 +130,94 @@ const ManualScannerScreen = ({navigation}) => {
                   <View style={styles.threatLevelRow}>
                     <Text style={styles.threatLabel}>Threat Level</Text>
                     <View style={styles.threatLevelContainer}>
-                      <View style={styles.threatLevelBarContainer}>
-                        <View
-                          style={[
-                            styles.threatLevelBar,
-                            {backgroundColor: 'green', width: '33%'},
-                          ]}
-                        />
-                        <View
-                          style={[
-                            styles.threatLevelBar,
-                            {backgroundColor: 'yellow', width: '33%'},
-                          ]}
-                        />
-                        <View
-                          style={[
-                            styles.threatLevelBar,
-                            {backgroundColor: 'red', width: '34%'},
-                          ]}
-                        />
+                      <View style={styles.threatLevelBarContainerDynamic}>
+                        <View style={{
+                          height: 10,
+                          width: `${threatLevel.percentage}%`,
+                          backgroundColor: getThreatColor(threatLevel.level),
+                          borderRadius: 5,
+                        }} />
                       </View>
                     </View>
                   </View>
                   <View style={styles.statusRow}>
                     <Text style={styles.threatLabel}>Status</Text>
-                    <Text style={styles.threatStatus}>
+                    <Text style={[
+                      styles.threatStatus,
+                      { color: getThreatColor(threatLevel.level) }
+                    ]}>
                       {threatLevel.status}
                     </Text>
                   </View>
                 </View>
                 <View style={styles.circularProgressWrapper}>
-                  <ThreatLevelProgress progress={1} />
+                  <ThreatLevelProgress
+                    progress={parseFloat(threatLevel.percentage) / 100}
+                    level={threatLevel.level}
+                  />
                 </View>
               </View>
 
-              {/* Alert Details & Insights */}
               <Text style={styles.detailsTitle}>Alert Details & Insights</Text>
               <View style={styles.card}>
                 <Text style={styles.detailsText}>
-                  <Text style={styles.boldText}>Alert Type:</Text>{' '}
-                  {threatLevel.type}
+                  <Text style={styles.boldText}>Alert Type:</Text> {threatLevel.type}
                 </Text>
                 <Text style={styles.detailsText}>
-                  <Text style={styles.boldText}>Threat Level:</Text>{' '}
-                  {threatLevel.level}
+                  <Text style={styles.boldText}>Threat Level:</Text> {threatLevel.level}
                 </Text>
                 <Text style={styles.detailsText}>
-                  <Text style={styles.boldText}>Description:</Text> This website
-                  appears to impersonate a legitimate e-commerce platform and
-                  may be designed to steal login credentials, payment details,
-                  or personal information.
+                  <Text style={styles.boldText}>Description:</Text> {threatLevel.description}
                 </Text>
+                {threatLevel.indicators.map((item, i) => (
+                  <Text key={i} style={styles.detailsText}>• {item}</Text>
+                ))}
+                {threatLevel.actions.map((item, i) => (
+                  <Text key={i} style={styles.detailsText}>• {item}</Text>
+                ))}
               </View>
 
-              {/* More Details Button */}
               <TouchableOpacity
                 style={styles.moreDetailsButton}
-                onPress={() => navigation.navigate('Report')}>
+                onPress={() => {
+                  if (lastScanId) {
+                    navigation.navigate('Report', { 
+                      scanId: lastScanId,
+                      threatCategory: threatLevel.status,
+                      threatPercentage: threatLevel.percentage
+                    });
+                  } else {
+                    Alert.alert('Error', 'Scan report not available');
+                  }
+                }}
+              >
                 <Text style={styles.moreDetailsText}>More Details</Text>
               </TouchableOpacity>
             </View>
           )}
         </ScrollView>
 
-        {/* Bottom Navigation */}
         <BottomNavBar navigation={navigation} />
       </View>
     </KeyboardAvoidingView>
   );
 };
 
-/* Threat Level Progress Component */
-const ThreatLevelProgress = ({progress}) => {
-  const size = 70; // Reduced size
-  const strokeWidth = 8; // Reduced stroke width
+const ThreatLevelProgress = ({ progress, level }) => {
+  const size = 70;
+  const strokeWidth = 8;
   const center = size / 2;
   const radius = center - strokeWidth / 2;
   const circumference = 2 * Math.PI * radius;
   const progressOffset = circumference * (1 - progress);
+
+  const getThreatColor = () => {
+    if (level === 'High') return '#FF0000';
+    if (level === 'Medium') return '#FFD700';
+    return '#4CAF50';
+  };
+
+  const circleColor = getThreatColor();
 
   return (
     <View style={styles.circularProgressContainerThreatLevel}>
@@ -192,7 +234,7 @@ const ThreatLevelProgress = ({progress}) => {
           cx={center}
           cy={center}
           r={radius}
-          stroke="#FF0000" // Red color for the progress circle
+          stroke={circleColor}
           strokeWidth={strokeWidth}
           fill="none"
           strokeDasharray={circumference}
@@ -202,15 +244,16 @@ const ThreatLevelProgress = ({progress}) => {
           origin={`${center}, ${center}`}
         />
       </Svg>
-      <Text style={styles.progressText}>{Math.round(progress * 100)}%</Text>
+      <Text style={[styles.progressText, { color: circleColor }]}>
+        {Math.round(progress * 100)}%
+      </Text>
     </View>
   );
 };
 
-/* Scan Progress Component */
-const ScanProgress = ({progress}) => {
-  const size = 100; // Increased size
-  const strokeWidth = 10; // Increased stroke width
+const ScanProgress = ({ progress }) => {
+  const size = 100;
+  const strokeWidth = 10;
   const center = size / 2;
   const radius = center - strokeWidth / 2;
   const circumference = 2 * Math.PI * radius;
@@ -231,7 +274,7 @@ const ScanProgress = ({progress}) => {
           cx={center}
           cy={center}
           r={radius}
-          stroke="#04366D" // Blue color for the progress circle
+          stroke="#04366D"
           strokeWidth={strokeWidth}
           fill="none"
           strokeDasharray={circumference}
@@ -246,12 +289,11 @@ const ScanProgress = ({progress}) => {
   );
 };
 
-/* Styles */
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-    justifyContent: 'space-between', // Ensure content is spaced correctly
+    justifyContent: 'space-between',
   },
   contentContainer: {
     paddingTop: 20,
@@ -275,7 +317,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   inputScanning: {
-    color: '#D3D3D3', // Light color when scanning
+    color: '#D3D3D3',
   },
   scanButton: {
     backgroundColor: '#04366D',
@@ -291,7 +333,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-Bold',
   },
   scanBox: {
-    position: 'absolute', // Center the scan box
+    position: 'absolute',
     top: '50%',
     left: '50%',
     transform: [{translateX: -50}, {translateY: -50}],
@@ -312,15 +354,14 @@ const styles = StyleSheet.create({
   },
   progressText: {
     position: 'absolute',
-    color: '#FF0000', // Red color for the progress text
-    fontSize: 13, // Reduced font size
+    fontSize: 13,
     fontFamily: 'Poppins-Bold',
     textAlign: 'center',
   },
   scanProgressText: {
     position: 'absolute',
-    color: '#04366D', // Blue color for the progress text
-    fontSize: 25, // Increased font size
+    color: '#04366D',
+    fontSize: 25,
     fontWeight: 'bold',
   },
   resultsBox: {
@@ -370,15 +411,12 @@ const styles = StyleSheet.create({
     marginTop: 5,
     width: '40%',
   },
-  threatLevelBarContainer: {
-    flexDirection: 'row',
+  threatLevelBarContainerDynamic: {
     height: 10,
+    backgroundColor: '#D3D3D3',
     borderRadius: 5,
     overflow: 'hidden',
-    marginBottom: 10,
-  },
-  threatLevelBar: {
-    height: '100%',
+    width: '100%',
   },
   threatLabel: {
     fontSize: 14,
@@ -391,7 +429,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     justifyContent: 'space-between',
-    color: 'red',
     marginLeft: 54,
     marginBottom: 3,
   },
@@ -417,12 +454,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-Bold',
     color: '#04366D',
     marginBottom: 10,
-  },
-  detailsBox: {
-    backgroundColor: '#F0EEEE',
-    padding: 15,
-    borderRadius: 5,
-    marginBottom: 20,
   },
   detailsText: {
     fontSize: 14,

@@ -9,16 +9,22 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // ✅ Store & get email
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const UpdateOtpFlowModal = ({ visible, onClose, onOtpSuccess, skipOtp = false }) => {
+const UpdateOtpFlowModal = ({
+  visible,
+  onClose,
+  onOtpSuccess,
+  skipOtp = false,
+  purpose, // ❗️ Must be "signup" or "login"
+}) => {
   const [step, setStep] = useState(1);
   const [otp, setOtp] = useState('');
   const [otpError, setOtpError] = useState('');
 
   useEffect(() => {
     if (visible && skipOtp) {
-      setStep(3); // Skip OTP if allowed
+      setStep(3);
     } else if (visible) {
       setStep(1);
     }
@@ -33,33 +39,43 @@ const UpdateOtpFlowModal = ({ visible, onClose, onOtpSuccess, skipOtp = false })
 
   const handleVerify = async () => {
     try {
+      if (!purpose || (purpose !== 'signup' && purpose !== 'login')) {
+        console.error('[FATAL] Missing or invalid purpose in OTP modal:', purpose);
+        setOtpError('Internal error: Missing or invalid OTP purpose.');
+        return;
+      }
+
       const email = await AsyncStorage.getItem('email');
       if (!email) {
         setOtpError('Missing email. Try again.');
         return;
       }
-  
-      const response = await axios.post('http://localhost:5000/api/auth/verify-otp', {
-        email: email,
-        otp: otp,
-        purpose: 'login',
+
+      console.log('[DEBUG] Sending OTP verification request with:', {
+        email,
+        otp,
+        purpose,
       });
-  
+
+      const response = await axios.post('http://localhost:5000/api/auth/verify-otp', {
+        email,
+        otp,
+        purpose,
+      });
+
       if (response.status === 200) {
         console.log('OTP verified successfully!');
-  
-        const token = response.data.token; // ✅ Get the token from response
-        await AsyncStorage.setItem('token', token); // ✅ Save token to AsyncStorage
-  
+        const token = response.data.token;
+        await AsyncStorage.setItem('token', token);
         setStep(3);
-        onOtpSuccess(); // ✅ Navigate to Dashboard
+        onOtpSuccess();
       }
     } catch (err) {
-      console.error('OTP verification failed:', err?.response?.data?.error || err.message);
+      const errorMsg = err?.response?.data?.error || err.message;
+      console.error('OTP verification failed:', errorMsg);
       setOtpError('Incorrect OTP. Please try again.');
     }
   };
-  
 
   const renderStep = () => {
     if (step === 1 && !skipOtp) {
@@ -153,6 +169,7 @@ const styles = StyleSheet.create({
     color: 'red',
     fontSize: 12,
     marginBottom: 10,
+    textAlign: 'center',
   },
   button: {
     backgroundColor: '#04366D',

@@ -8,138 +8,286 @@ import {
   StyleSheet,
   TouchableWithoutFeedback,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import Icon from 'react-native-vector-icons/MaterialIcons'; // Import the icon library
 
 const DeleteFlowModalController = ({visible, onClose}) => {
   const [step, setStep] = useState(1);
   const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [attempts, setAttempts] = useState(0);
   const [isOtpCorrect, setIsOtpCorrect] = useState(false);
-  const [otpError, setOtpError] = useState(false);
-  const [passwordError, setPasswordError] = useState(false);
-
-  const correctPassword = '123456';
-  const correctOtp = '7890';
+  const [errors, setErrors] = useState({});
+  const [showPassword, setShowPassword] = useState(false); // For toggling password visibility
+  const [showNewPassword, setShowNewPassword] = useState(false); // For new password visibility
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false); // For confirm password visibility
 
   const resetAll = () => {
     setStep(1);
     setPassword('');
+    setEmail('');
     setOtp('');
     setNewPassword('');
     setConfirmPassword('');
     setAttempts(0);
     setIsOtpCorrect(false);
-    setOtpError(false);
-    setPasswordError(false);
+    setErrors({});
     onClose();
   };
 
-  const handlePasswordCheck = () => {
-    if (password === correctPassword) {
-      setPasswordError(false);
-      setStep(step + 1);
-    } else {
-      const newAttempts = attempts + 1;
-      setAttempts(newAttempts);
-      if (newAttempts >= 2) {
-        setStep(3); // Go to email step
-        setPasswordError(false);
+  const getToken = async () => await AsyncStorage.getItem('token');
+
+  const handlePasswordCheck = async () => {
+    try {
+      const token = await getToken();
+      const res = await axios.post(
+        'http://localhost:5000/api/delete/confirm-password',
+        {password},
+        {headers: {Authorization: `Bearer ${token}`}},
+      );
+      if (res.status === 200) {
+        setStep(6); // ✅ Immediately go to delete confirm if password correct
+      }
+    } catch (err) {
+      const newTries = attempts + 1;
+      setAttempts(newTries);
+      if (newTries >= 2) {
+        setStep(3); // go to email entry
       } else {
-        setPasswordError(true);
+        setErrors({password: 'Incorrect password'});
       }
     }
   };
 
-  const handleOtpVerify = () => {
-    if (otp === correctOtp) {
-      setOtpError(false);
-      setIsOtpCorrect(true);
-    } else {
-      setOtpError(true);
+  const handleSendOtp = async () => {
+    try {
+      const token = await getToken();
+      await axios.post(
+        'http://localhost:5000/api/delete/send-otp',
+        {},
+        {
+          headers: {Authorization: `Bearer ${token}`},
+        },
+      );
+      setStep(4);
+    } catch (err) {
+      console.error('OTP send failed:', err);
     }
   };
 
-  const handleFinalDelete = () => {
-    if (password === correctPassword) {
+  const handleOtpVerify = async () => {
+    if (!otp.trim()) {
+      setErrors({otp: 'OTP is required'});
+      return;
+    }
+
+    try {
+      const token = await getToken();
+      const res = await axios.post(
+        'http://localhost:5000/api/delete/verify-otp',
+        {otp: otp.trim()},
+        {headers: {Authorization: `Bearer ${token}`}},
+      );
+      if (res.status === 200) {
+        setIsOtpCorrect(true);
+        setErrors({});
+      }
+    } catch (err) {
+      setErrors({otp: 'Invalid OTP'});
+    }
+  };
+
+  const handleSavePassword = async () => {
+    if (!newPassword || newPassword !== confirmPassword) {
+      setErrors({save: 'Passwords do not match'});
+      return;
+    }
+
+    try {
+      const token = await getToken();
+      await axios.post(
+        'http://localhost:5000/api/delete/set-password',
+        {newPassword},
+        {headers: {Authorization: `Bearer ${token}`}},
+      );
+      setStep(6);
+    } catch (err) {
+      setErrors({save: 'Failed to save new password'});
+    }
+  };
+
+  const handleFinalDelete = async () => {
+    try {
+      const token = await getToken();
+      await axios.delete('http://localhost:5000/api/delete/final', {
+        headers: {Authorization: `Bearer ${token}`},
+      });
       setStep(7);
-    } else {
-      setPasswordError(true);
+    } catch (err) {
+      console.error('Delete failed:', err);
     }
   };
 
   const renderStep = () => {
     switch (step) {
       case 1:
-        return (
-          <ModalView title="Are you sure you want to delete your account?">
-            <ActionButtons onCancel={resetAll} onConfirm={() => setStep(2)} />
-          </ModalView>
-        );
+        return renderModal('Are you sure you want to delete your account?', [
+          <ActionButtons onCancel={resetAll} onConfirm={() => setStep(2)} />,
+        ]);
       case 2:
-        return (
-          <PasswordInputModal
-            title="Confirm Password"
-            value={password}
-            onChange={setPassword}
-            onConfirm={handlePasswordCheck}
-            onForgot={() => setStep(3)}
-            error={passwordError}
-          />
-        );
+        return renderModal('Confirm Password', [
+          <View style={styles.passwordInputContainer}>
+            <TextInput
+              placeholder="Password"
+              value={password}
+              secureTextEntry={!showPassword}
+              onChangeText={setPassword}
+              style={styles.inputBox} // Use a style without borders for the TextInput
+            />
+            <TouchableOpacity
+              onPress={() => setShowPassword(!showPassword)}
+              style={styles.iconContainer}>
+              <Icon
+                name={showPassword ? 'visibility' : 'visibility-off'}
+                size={20}
+                color="black"
+              />
+            </TouchableOpacity>
+          </View>,
+          errors.password && (
+            <Text style={styles.error}>{errors.password}</Text>
+          ),
+          <TouchableOpacity onPress={() => setStep(3)}>
+            <Text style={styles.link}>Forgot password?</Text>
+          </TouchableOpacity>,
+          <TouchableOpacity style={styles.button} onPress={handlePasswordCheck}>
+            <Text style={styles.buttonText}>Confirm</Text>
+          </TouchableOpacity>,
+        ]);
       case 3:
-        return <EmailInputModal onConfirm={() => setStep(4)} />;
+        return renderModal('Enter Email to Send OTP', [
+          <TextInput
+            placeholder="Enter your email address"
+            value={email}
+            onChangeText={setEmail}
+            style={styles.input}
+            keyboardType="email-address" // Ensures the keyboard is optimized for email input
+          />,
+          <TouchableOpacity style={styles.button} onPress={handleSendOtp}>
+            <Text style={styles.buttonText}>Send OTP</Text>
+          </TouchableOpacity>,
+        ]);
       case 4:
-        return (
-          <InfoModal
-            message="We have sent a one-time password to your email. Enter it in the password box."
-            onOk={() => setStep(5)}
-          />
-        );
-      case 5:
-        return (
-          <OtpAndResetPasswordModal
-            otp={otp}
-            onOtpChange={setOtp}
-            newPassword={newPassword}
-            confirmPassword={confirmPassword}
-            onNewPasswordChange={setNewPassword}
-            onConfirmPasswordChange={setConfirmPassword}
-            onVerify={handleOtpVerify}
-            isOtpCorrect={isOtpCorrect}
-            otpError={otpError}
-            onNext={() => setStep(6)}
-          />
-        );
+        return renderModal('Verify OTP', [
+          <TextInput
+            placeholder="Enter OTP"
+            value={otp}
+            onChangeText={setOtp}
+            style={styles.input}
+          />,
+          errors.otp && <Text style={styles.error}>{errors.otp}</Text>,
+          !isOtpCorrect && (
+            <TouchableOpacity style={styles.button} onPress={handleOtpVerify}>
+              <Text style={styles.buttonText}>Verify OTP</Text>
+            </TouchableOpacity>
+          ),
+          isOtpCorrect && (
+            <>
+              <View style={styles.passwordInputContainer}>
+                <TextInput
+                  placeholder="New Password"
+                  secureTextEntry={!showNewPassword}
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  style={styles.inputBox} // Use a style without borders for the TextInput
+                />
+                <TouchableOpacity
+                  onPress={() => setShowNewPassword(!showNewPassword)}
+                  style={styles.iconContainer}>
+                  <Icon
+                    name={showNewPassword ? 'visibility' : 'visibility-off'}
+                    size={20}
+                    color="black"
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.passwordInputContainer}>
+                <TextInput
+                  placeholder="Confirm Password"
+                  secureTextEntry={!showConfirmPassword}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  style={styles.inputBox} // Use a style without borders for the TextInput
+                />
+                <TouchableOpacity
+                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                  style={styles.iconContainer}>
+                  <Icon
+                    name={showConfirmPassword ? 'visibility' : 'visibility-off'}
+                    size={20}
+                    color="black"
+                  />
+                </TouchableOpacity>
+              </View>
+
+              {errors.save && <Text style={styles.error}>{errors.save}</Text>}
+              <TouchableOpacity
+                style={styles.button}
+                onPress={handleSavePassword}>
+                <Text style={styles.buttonText}>Save Password</Text>
+              </TouchableOpacity>
+            </>
+          ),
+        ]);
       case 6:
-        return (
-          <PasswordInputModal
-            title="Confirm Password"
-            value={password}
-            onChange={setPassword}
-            onConfirm={handleFinalDelete}
-            error={passwordError}
-            onForgot={() => setStep(3)}
-          />
-        );
+        return renderModal('Confirm Account Deletion', [
+          <View style={styles.passwordInputContainer}>
+            <TextInput
+              placeholder="Password"
+              value={password}
+              secureTextEntry={!showPassword}
+              onChangeText={setPassword}
+              style={styles.inputBox} // Use a style without borders for the TextInput
+            />
+            <TouchableOpacity
+              onPress={() => setShowPassword(!showPassword)}
+              style={styles.iconContainer}>
+              <Icon
+                name={showPassword ? 'visibility' : 'visibility-off'}
+                size={20}
+                color="black"
+              />
+            </TouchableOpacity>
+          </View>,
+          <TouchableOpacity style={styles.button} onPress={handleFinalDelete}>
+            <Text style={styles.buttonText}>Delete Account</Text>
+          </TouchableOpacity>,
+        ]);
       case 7:
-        return (
-          <InfoModal
-            message="Your account has been successfully deleted. Thank You!"
-            onOk={resetAll}
-          />
-        );
-      default:
-        return null;
+        return renderModal('✅ Account Deleted', [
+          <TouchableOpacity style={styles.button} onPress={resetAll}>
+            <Text style={styles.buttonText}>Close</Text>
+          </TouchableOpacity>,
+        ]);
     }
   };
 
+  const renderModal = (title, children) => (
+    <View style={styles.modalBox}>
+      <Text style={styles.title}>{title}</Text>
+      {children}
+    </View>
+  );
+
   return (
-    <Modal transparent visible={visible} animationType="fade">
+    <Modal visible={visible} transparent animationType="fade">
       <TouchableWithoutFeedback onPress={resetAll}>
-        <View style={styles.deleteOverlay}>
+        <View style={styles.overlay}>
           <TouchableWithoutFeedback>{renderStep()}</TouchableWithoutFeedback>
         </View>
       </TouchableWithoutFeedback>
@@ -147,266 +295,123 @@ const DeleteFlowModalController = ({visible, onClose}) => {
   );
 };
 
-// ========== Modal Components ==========
-
-const ModalView = ({title, children}) => (
-  <View style={styles.deleteModalBox}>
-    {title !== '' && <Text style={styles.deleteModalTitle}>{title}</Text>}
-    {children}
-  </View>
-);
-
 const ActionButtons = ({onCancel, onConfirm}) => (
-  <View style={styles.deleteButtonRow}>
-    <TouchableOpacity style={styles.deleteBtnCancel} onPress={onCancel}>
-      <Text style={styles.deleteBtnText}>Back</Text>
+  <View style={styles.row}>
+    <TouchableOpacity style={styles.blueButton} onPress={onCancel}>
+      <Text style={styles.buttonText}>Back</Text>
     </TouchableOpacity>
-    <TouchableOpacity style={styles.deleteBtnConfirm} onPress={onConfirm}>
-      <Text style={styles.deleteBtnText}>Yes</Text>
+    <TouchableOpacity style={styles.blueButton} onPress={onConfirm}>
+      <Text style={styles.buttonText}>Yes</Text>
     </TouchableOpacity>
   </View>
 );
 
-const PasswordInputModal = ({
-  title,
-  value,
-  onChange,
-  onConfirm,
-  onForgot,
-  error,
-}) => (
-  <ModalView title={title}>
-    <TextInput
-      placeholder="Enter your password"
-      secureTextEntry
-      style={styles.deleteInput}
-      value={value}
-      onChangeText={onChange}
-    />
-    {error && (
-      <View>
-        <Text style={styles.deleteError}>Re-enter the password</Text>
-      </View>
-    )}
-    <View style={styles.deleteForgot}>
-      <TouchableOpacity onPress={onForgot}>
-        <Text style={styles.deleteForgot}>Forgot Password?</Text>
-      </TouchableOpacity>
-    </View>
-    <TouchableOpacity style={styles.deleteBtnConfirm} onPress={onConfirm}>
-      <Text style={styles.deleteBtnText}>Confirm</Text>
-    </TouchableOpacity>
-  </ModalView>
-);
-
-const EmailInputModal = ({onConfirm}) => {
-  const [email, setEmail] = useState('');
-  return (
-    <ModalView title="Confirm Email">
-      <TextInput
-        placeholder="Enter your email"
-        style={styles.deleteInput}
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TouchableOpacity style={styles.deleteBtnConfirm} onPress={onConfirm}>
-        <Text style={styles.deleteBtnText}>Confirm</Text>
-      </TouchableOpacity>
-    </ModalView>
-  );
-};
-
-const InfoModal = ({message, onOk}) => (
-  <ModalView title="">
-    <Text style={styles.deleteInfo}>{message}</Text>
-    <TouchableOpacity style={styles.deleteBtnConfirm} onPress={onOk}>
-      <Text style={styles.deleteBtnText}>Ok</Text>
-    </TouchableOpacity>
-  </ModalView>
-);
-
-const OtpAndResetPasswordModal = ({
-  otp,
-  onOtpChange,
-  newPassword,
-  confirmPassword,
-  onNewPasswordChange,
-  onConfirmPasswordChange,
-  onVerify,
-  isOtpCorrect,
-  otpError,
-  onNext,
-}) => (
-  <ModalView title="Password">
-    <Text style={styles.deleteLabel}>Current Password</Text>
-    <TextInput
-      placeholder="Enter One-Time Password"
-      style={styles.deleteUnderlineInput}
-      value={otp}
-      onChangeText={onOtpChange}
-    />
-    {otpError && (
-      <Text style={styles.deleteError}>Incorrect OTP. Try again.</Text>
-    )}
-    {isOtpCorrect && (
-      <View style={styles.otpVerifiedContainer}>
-        <Icon name="check-circle" size={20} color="green" />
-        <Text style={styles.deleteSuccess}>OTP Verified</Text>
-      </View>
-    )}
-
-    <TouchableOpacity style={styles.deleteBtnOrange} onPress={onVerify}>
-      <Text style={styles.deleteBtnText}>Verify</Text>
-    </TouchableOpacity>
-
-    {isOtpCorrect && (
-      <>
-        <Text style={styles.deleteLabel}>New Password</Text>
-        <TextInput
-          placeholder="Enter new password"
-          style={styles.deleteUnderlineInput}
-          secureTextEntry
-          value={newPassword}
-          onChangeText={onNewPasswordChange}
-        />
-        <Text style={styles.deleteLabel}>Confirm Password</Text>
-        <TextInput
-          placeholder="Re-enter new password"
-          style={styles.deleteUnderlineInput}
-          secureTextEntry
-          value={confirmPassword}
-          onChangeText={onConfirmPasswordChange}
-        />
-        <TouchableOpacity style={styles.deleteSaveBtnConfirm} onPress={onNext}>
-          <Text style={styles.deleteBtnText}>Save Changes</Text>
-        </TouchableOpacity>
-      </>
-    )}
-  </ModalView>
-);
-
-// ========== Styles ==========
+// ---------- Styles ----------
 const styles = StyleSheet.create({
-  deleteOverlay: {
+  overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  deleteModalBox: {
-    width: '85%',
+  modalBox: {
     backgroundColor: '#fff',
+    width: '85%',
     borderRadius: 10,
     padding: 20,
     alignItems: 'center',
   },
-  deleteModalTitle: {
+  title: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#04366D',
     marginBottom: 10,
     textAlign: 'center',
+    color: '#04366D',
   },
-  deleteInput: {
-    width: '100%',
-    borderColor: '#ccc',
+  input: {
+    padding: 20,
     borderWidth: 1,
-    padding: 10,
-    marginVertical: 10,
+    borderColor: '#ccc',
     borderRadius: 5,
-  },
-  deleteUnderlineInput: {
+    marginBottom: 20,
+    marginTop: 10,
     width: '100%',
-    borderBottomWidth: 1,
-    borderBottomColor: '#aaa',
-    paddingVertical: 8,
-    marginBottom: 10,
-  },
-  deleteLabel: {
-    alignSelf: 'flex-start',
-    fontWeight: 'bold',
     fontSize: 14,
-    color: '#04366D',
-    marginTop: 20,
-    marginBottom: 10,
+    color: '#000',
   },
-  deleteButtonRow: {
-    flexDirection: 'row',
-    marginTop: 30,
-    justifyContent: 'space-between',
+  inputBox: {
+    flex: 1, // Ensures the TextInput takes up the remaining space
+    padding: 8, // Reduced padding for a smaller input area
+    fontSize: 14,
+    color: '#000',
+  },
+  button: {
+    backgroundColor: '#04366D',
+    padding: 10,
+    borderRadius: 5,
     width: '100%',
-  },
-  deleteBtnCancel: {
-    backgroundColor: '#04366D',
-    padding: 10,
-    borderRadius: 5,
-    textAlign: 'center',
-    marginHorizontal: 15,
-    width: '35%',
     alignItems: 'center',
-    marginTop: 15,
+    marginTop: 5,
   },
-  deleteBtnConfirm: {
-    backgroundColor: '#04366D',
-    padding: 10,
-    borderRadius: 5,
-    textAlign: 'center',
-    marginHorizontal: 15,
-    width: '35%',
-    alignItems: 'center',
-    marginTop: 15,
-  },
-  deleteBtnOrange: {
-    backgroundColor: '#FFA500',
-    padding: 10,
-    borderRadius: 5,
-    width: '40%',
-    marginVertical: 10,
-    alignItems: 'center',
-    marginTop: 25,
-  },
-  deleteSaveBtnConfirm: {
-    backgroundColor: '#04366D',
-    padding: 10,
-    borderRadius: 5,
-    width: '40%',
-    marginVertical: 10,
-    alignItems: 'center',
-    marginTop: 25,
-  },
-  deleteBtnText: {
+  buttonText: {
     color: '#fff',
     fontWeight: 'bold',
   },
-  deleteInfo: {
-    fontSize: 14,
-    marginBottom: 15,
-    textAlign: 'center',
-  },
-  deleteError: {
+  error: {
     color: 'red',
     fontSize: 12,
-    marginRight: 160,
     marginBottom: 5,
-  },
-  deleteSuccess: {
-    color: 'green',
-    fontSize: 14,
-    marginBottom: 10,
     alignSelf: 'flex-start',
-    marginLeft: 15,
   },
-  deleteForgot: {
-    fontSize: 12,
+  link: {
     color: '#007BFF',
-    alignSelf: 'flex-end', // Align to the right
+    fontSize: 13,
+    alignSelf: 'flex-end',
+    marginRight: -155,
     marginBottom: 10,
-    marginTop: 5,
+    marginTop: -10,
   },
-  otpVerifiedContainer: {
+  row: {
     flexDirection: 'row',
-    alignSelf: 'flex-start', // Ensure the container itself aligns to the left
-    marginBottom: 10,
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 20,
+  },
+  cancel: {
+    backgroundColor: '#888',
+    padding: 10,
+    borderRadius: 5,
+    width: '45%',
+    alignItems: 'center',
+  },
+  confirm: {
+    backgroundColor: '#04366D',
+    padding: 10,
+    borderRadius: 5,
+    width: '45%',
+    alignItems: 'center',
+  },
+  blueButton: {
+    backgroundColor: '#04366D', // Blue color
+    padding: 10,
+    borderRadius: 5,
+    width: '45%',
+    alignItems: 'center',
+  },
+  passwordInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 5,
+    marginTop: 20,
+    marginBottom: 25, // Reduced margin for smaller spacing
+    paddingHorizontal: 8, // Reduced padding for a smaller box
+    height: 60, // Set a fixed height for the box
+    width: '100%',
+  },
+  iconContainer: {
+    padding: 5,
   },
 });
 

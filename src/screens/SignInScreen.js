@@ -116,6 +116,7 @@ const SignInScreen = ({ navigation }) => {
       {/* OTP Modal */}
       <UpdateOtpFlowModal
         visible={showOtpModal}
+        purpose={'login'}
         onClose={() => setShowOtpModal(false)}
         skipThankYou={true}
         onOtpSuccess={() => {

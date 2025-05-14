@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -11,18 +11,46 @@ import {
   ScrollView,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import UpdateOtpFlowModal from '../modals/UpdateOtpFlowModal';
 
-const SignUpScreen = ({navigation}) => {
+const SignUpScreen = ({ navigation }) => {
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [showOtpModal, setShowOtpModal] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSignUp = () => {
-    // Call backend sign-up logic here
+  const handleSignUp = async () => {
+    setError('');
+    if (!username || !email || !password || !confirmPassword) {
+      return setError('All fields are required.');
+    }
 
-    // Trigger OTP verification modal
-    setShowOtpModal(true);
+    if (password !== confirmPassword) {
+      return setError('Passwords do not match.');
+    }
+
+    try {
+      const response = await axios.post('http://localhost:5000/api/auth/signup', {
+        email,
+        username,
+        password,
+      });
+
+      if (response.status === 201) {
+        await AsyncStorage.setItem('email', email);
+        setShowOtpModal(true);
+      }
+    } catch (err) {
+      const msg = err?.response?.data?.error || 'Sign-up failed. Please try again.';
+      console.error('Sign up failed:', msg);
+      setError(msg);
+    }
   };
 
   return (
@@ -30,63 +58,60 @@ const SignUpScreen = ({navigation}) => {
       style={styles.container}
       behavior={Platform.OS === 'android' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={styles.scrollContainer}>
-        {/* Logo */}
-        <Image
-          source={require('../assets/Logo.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
-
-        {/* Title */}
+        <Image source={require('../assets/Logo.png')} style={styles.logo} resizeMode="contain" />
         <Text style={styles.title}>GUARD SPIRE</Text>
 
-        {/* Username Input */}
         <TextInput
           style={styles.input}
           placeholder='Username (e.g., "Joe Fernando")'
           placeholderTextColor="#888"
+          value={username}
+          onChangeText={setUsername}
         />
 
-        {/* Email Input */}
         <TextInput
           style={styles.input}
           placeholder='Email (e.g., "joe12@example.com")'
           placeholderTextColor="#888"
           keyboardType="email-address"
+          value={email}
+          onChangeText={setEmail}
         />
 
-        {/* Password Input */}
         <View style={styles.passwordContainer}>
           <TextInput
             style={styles.inputPassword}
             placeholder="Enter your password"
             placeholderTextColor="#888"
             secureTextEntry={!passwordVisible}
+            value={password}
+            onChangeText={setPassword}
           />
           <TouchableOpacity onPress={() => setPasswordVisible(!passwordVisible)}>
             <Icon name={passwordVisible ? 'eye' : 'eye-slash'} size={20} color="black" />
           </TouchableOpacity>
         </View>
 
-        {/* Confirm Password Input */}
         <View style={styles.passwordContainer}>
           <TextInput
             style={styles.inputPassword}
             placeholder="Confirm your password"
             placeholderTextColor="#888"
             secureTextEntry={!confirmPasswordVisible}
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
           />
           <TouchableOpacity onPress={() => setConfirmPasswordVisible(!confirmPasswordVisible)}>
             <Icon name={confirmPasswordVisible ? 'eye' : 'eye-slash'} size={20} color="black" />
           </TouchableOpacity>
         </View>
 
-        {/* Sign Up Button */}
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
         <TouchableOpacity style={styles.signUpButton} onPress={handleSignUp}>
           <Text style={styles.signUpText}>Sign Up</Text>
         </TouchableOpacity>
 
-        {/* Already Have an Account? Redirect to Sign-In */}
         <TouchableOpacity onPress={() => navigation.navigate('SignIn')}>
           <Text style={styles.signInText}>
             Already have an account? <Text style={styles.signInLink}>Sign In</Text>
@@ -94,12 +119,13 @@ const SignUpScreen = ({navigation}) => {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* OTP Verification Modal */}
       <UpdateOtpFlowModal
         visible={showOtpModal}
+        purpose={'signup'}
         onClose={() => setShowOtpModal(false)}
         onOtpSuccess={() => {
           console.log('Signup confirmed via OTP');
+          navigation.navigate('SignIn');
           setShowOtpModal(false);
         }}
       />

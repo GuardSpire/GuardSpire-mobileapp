@@ -7,12 +7,12 @@ import {
   PermissionsAndroid,
   Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import BackgroundTimer from 'react-native-background-timer';
 import PushNotification from 'react-native-push-notification';
 
 const { NotificationListener } = NativeModules;
 
-// Ensure no warnings if module lacks addListener/removeListeners
 if (NotificationListener && !NotificationListener.addListener) {
   NotificationListener.addListener = () => {};
   NotificationListener.removeListeners = () => {};
@@ -26,10 +26,19 @@ class NotificationService {
     this.popupTrigger = null;
     this.pendingPopup = null;
     this.testMode = false;
+    this.userEmail = null;
+
+    this.recentNotifications = new Set(); // For fingerprint deduplication
+    this.lastNotificationTime = 0;        // For global cooldown
 
     this.createChannel();
     this.setupListeners();
     this.checkAndRequestNotificationPermission();
+  }
+
+  setUserEmail(email) {
+    this.userEmail = email;
+    console.log(`[GuardSpire] NotificationService: User email set to ${email}`);
   }
 
   enableTestMode() {
@@ -99,7 +108,7 @@ class NotificationService {
         lights: true,
         lightColor: '#FF0000',
       },
-      (created) => console.log(`Notification channel ${created ? 'created' : 'exists'}`)
+      (created) => console.log(`Notification channel ${created ? 'created' : 'already exists'}`)
     );
   };
 
@@ -124,16 +133,47 @@ class NotificationService {
 
   handlePushNotification = (notification) => {
     const { scamData, showPopup } = notification.userInfo || notification.data || {};
+    const action = notification.action;
 
     if (notification.userInteraction) {
-      if (showPopup && scamData) {
+      if (action === 'Block' && scamData?.scan_id) {
+        console.log('[GuardSpire] Block action pressed in notification');
+        this.reportScan(scamData.scan_id);
+      } else if (action === 'View' && scamData) {
         this.triggerPopup(scamData);
-      }
-      if (AppState.currentState !== 'active') {
         Linking.openURL('guardspire://scam-alert');
+      } else if (showPopup && scamData) {
+        this.triggerPopup(scamData);
       }
     } else if (AppState.currentState !== 'active') {
       notification.finish?.(PushNotification.FetchResult.NewData);
+    }
+  };
+
+  reportScan = async (scanId) => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        console.warn('[GuardSpire] Auth token not found. Cannot report scan.');
+        return;
+      }
+
+      const res = await fetch(`http://localhost:5000/api/scan/manual/report/${scanId}/report`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        console.error('Scan report failed:', result?.error || result);
+      } else {
+        console.log('[GuardSpire] Scan successfully reported and blocked.');
+      }
+    } catch (err) {
+      console.error('[GuardSpire] Failed to report scan from notification:', err);
     }
   };
 
@@ -165,8 +205,31 @@ class NotificationService {
   };
 
   handleNotification = (notification) => {
-    console.log('Received notification:', notification);
-    if (this.testMode) console.log('[TEST] Processing test notification');
+    const now = Date.now();
+    const cooldownPeriod = 10000; // 10 seconds between notifications
+
+    const messageKey = `${notification.package}_${notification.title}_${notification.text?.trim()}`;
+
+    if (!notification.text) {
+      console.log('[GuardSpire] Skipped empty notification');
+      return;
+    }
+
+    if (this.recentNotifications.has(messageKey)) {
+      console.log('[GuardSpire] Duplicate notification skipped:', messageKey);
+      return;
+    }
+
+    if (now - this.lastNotificationTime < cooldownPeriod) {
+      console.log('[GuardSpire] Rate-limited notification skipped');
+      return;
+    }
+
+    this.recentNotifications.add(messageKey);
+    setTimeout(() => this.recentNotifications.delete(messageKey), 15000);
+    this.lastNotificationTime = now;
+
+    console.log('[GuardSpire] Processing notification:', messageKey);
     this.notifications.push(notification);
     this.processNotification(notification);
   };
@@ -185,36 +248,29 @@ class NotificationService {
 
   scanContent = async (data) => {
     try {
-      if (this.testMode) {
-        const testResult = {
-          show_warning: true,
-          combined_threat: {
-            score: 9.4,
-            category: 'Critical',
-            confidence: 0.98,
-            source: 'text_analysis',
-          },
-          text_analysis: {
-            is_scam: true,
-            confidence: 0.98,
-            description: 'TEST: Classified as SCAM (Confidence: 98%)',
-          },
-        };
-        return this.handleThreatDetected(testResult);
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        console.warn('[GuardSpire] Auth token not found. Scan skipped.');
+        return;
       }
+
+      const payload = {
+        text: data.processed.text,
+        urls: data.processed.urls,
+        user: this.userEmail || 'anonymous@device',
+      };
 
       const response = await fetch('http://localhost:5000/api/scan/notification/scan', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: data.processed.text,
-          urls: data.processed.urls,
-          user: 'anonymous@device',
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
       });
 
       const result = await response.json();
-      console.log('Scan result:', result);
+      console.log('[GuardSpire] Scan result:', result);
 
       if (result?.show_warning) {
         this.handleThreatDetected(result);
@@ -237,7 +293,7 @@ class NotificationService {
       channelId: 'scam-alerts',
       title: '🚨 Scam Detected!',
       message: scamData.combined_threat?.description || 'Potential threat found',
-      bigText: `Threat Level: ${scamData.combined_threat?.score}\n${scamData.text_analysis?.description}`,
+      bigText: `Threat Level: ${scamData.combined_threat?.score}\n${scamData.text_analysis?.description || ''}`,
       subText: 'Tap to view details',
       priority: 'max',
       importance: 'max',
@@ -249,7 +305,7 @@ class NotificationService {
       invokeApp: true,
       userInfo: {
         showPopup: true,
-        scamData: scamData,
+        scamData,
       },
       actions: ['Block', 'View'],
     });

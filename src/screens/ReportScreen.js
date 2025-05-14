@@ -1,178 +1,204 @@
-import React, {useState} from 'react';
-import {View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal} from 'react-native';
-import Svg, {Circle} from 'react-native-svg';
+import React, { useState, useEffect } from 'react';
+import {
+  View, Text, TouchableOpacity, StyleSheet, ScrollView,
+  Alert, Modal, ActivityIndicator,
+} from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import TopNavBar from '../components/TopNavBar';
 import BottomNavBar from '../components/BottomNavBar';
 
-const ReportScreen = ({navigation}) => {
+const ReportScreen = ({ navigation, route }) => {
+  const { scanId, threatCategory: initialThreatCategory, input, onGoBack } = route.params || {};
+  const [scanData, setScanData] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
 
-  // Mock scam report data
-  const scamData = {
-    type: 'Phishing Scam',
-    platform: 'Online Shopping (Daraz Impersonation)',
-    url: 'daraz-lk-offer.com',
-    threatLevel: 'High',
-    description:
-      'This website appears to impersonate Daraz, a legitimate e-commerce platform, in order to deceive and steal login credentials, payment details, or personal information by luring users with fake discounts, promotions or giveaways.',
-    indicators: [
-      'The site does not match the official Daraz domain.',
-      'The website may request sensitive information such as bank details or passwords.',
-      'Offers and discounts appear too good to be true.',
-      'Unusual design or unusual pop-ups asking for personal information.',
-    ],
-    actions: [
-      'Do not enter any personal or payment details.',
-      'Close the website immediately and do not click on any links.',
-      'Report the phishing attempt to Daraz and internet cybersecurity authorities.',
-      'If any details were entered, immediately reset passwords and monitor financial transactions.',
-    ],
-    threatPercentage: 1, // Example percentage (75%)
-  };
+  useEffect(() => {
+    const fetchReport = async () => {
+      if (!scanId) return;
 
-  const getThreatLevel = percentage => {
-    if (percentage >= 0.75) {
-      return 'Critical';
-    } else if (percentage >= 0.5) {
-      return 'High';
-    } else if (percentage >= 0.25) {
-      return 'Medium';
-    } else {
-      return 'Low';
-    }
-  };
+      setLoading(true);
+      try {
+        const token = await AsyncStorage.getItem('token');
+        const res = await fetch(`http://localhost:5000/api/scan/manual/report/${scanId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || 'Failed to fetch');
 
-  const threatLevel = getThreatLevel(scamData.threatPercentage);
+        const normalizedThreatCategory = initialThreatCategory || 
+                                      data.threatCategory || 
+                                      'Stable';
+        
+        const normalizedData = {
+          ...data,
+          input: input || data.input,
+          threatCategory: normalizedThreatCategory.charAt(0).toUpperCase() + 
+                         normalizedThreatCategory.slice(1).toLowerCase()
+        };
+        
+        setScanData(normalizedData);
+      } catch (e) {
+        console.error(e);
+        Alert.alert('Error', 'Failed to load scan report.');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  // Function to handle report button click
-  const handleReportSubmit = () => {
+    fetchReport();
+  }, [scanId, initialThreatCategory, input]);
+
+  const handleReportSubmit = async () => {
+    if (!scanId) return;
     setIsSubmitting(true);
-    setTimeout(() => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const res = await fetch(
+        `http://localhost:5000/api/scan/manual/report/${scanId}/report`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to report');
+
+      setFeedbackMessage('Scam has been successfully reported and blocked.');
+      setModalVisible(true);
+
+      // 🔄 Trigger refresh in parent component
+      if (onGoBack) onGoBack();
+    } catch (err) {
+      Alert.alert('Error', err.message);
+    } finally {
       setIsSubmitting(false);
-      Alert.alert('Success', 'Scam reported successfully!');
-    }, 1500); // Simulating a short delay
-  };
-
-  const handleFeedback = isValid => {
-    if (isValid) {
-      setFeedbackMessage(
-        'Thank you for confirming. Rest assured, we are working to secure your account and prevent any further issues.',
-      );
-    } else {
-      setFeedbackMessage(
-        "Thank you for your feedback. We'll review this alert and refine our detection system.",
-      );
     }
-    setModalVisible(true);
   };
 
-  const ThreatLevelProgress = ({progress}) => {
+  const handleFeedback = async (isValid) => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      await fetch(`http://localhost:5000/api/scan/manual/feedback/${scanId}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          feedback: isValid,
+          input: scanData.input,
+          original_category: scanData.threatCategory,
+        }),
+      });
+      setFeedbackMessage(
+        isValid
+          ? 'Thank you for confirming. We are working to secure your account.'
+          : "Thank you for your feedback. We'll review this alert."
+      );
+      setModalVisible(true);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to submit feedback.');
+    }
+  };
+
+  const ThreatLevelProgress = ({ progress, color }) => {
     const size = 48;
     const strokeWidth = 5;
     const center = size / 2;
     const radius = center - strokeWidth / 2;
     const circumference = 2 * Math.PI * radius;
-    const progressOffset = circumference * (1 - progress);
+    const offset = circumference * (1 - progress);
 
     return (
       <View style={styles.circularProgressContainer}>
         <Svg width={size} height={size}>
+          <Circle cx={center} cy={center} r={radius} stroke="#D3D3D3" strokeWidth={strokeWidth} fill="none" />
           <Circle
             cx={center}
             cy={center}
             r={radius}
-            stroke="#D3D3D3"
-            strokeWidth={strokeWidth}
-            fill="none"
-          />
-          <Circle
-            cx={center}
-            cy={center}
-            r={radius}
-            stroke="#FF0000"
+            stroke={color}
             strokeWidth={strokeWidth}
             fill="none"
             strokeDasharray={circumference}
-            strokeDashoffset={progressOffset}
+            strokeDashoffset={offset}
             strokeLinecap="round"
             rotation="-90"
             origin={`${center}, ${center}`}
           />
         </Svg>
-        <Text style={styles.progressText}>{Math.round(progress * 100)}%</Text>
+        <Text style={[styles.progressText, { color }]}>{Math.round(progress * 100)}%</Text>
       </View>
     );
   };
 
+  if (loading) return <ActivityIndicator style={{ flex: 1 }} size="large" color="#04366D" />;
+  if (!scanData) return <Text>Scan data not available</Text>;
+
+  const percent = typeof scanData.threatPercentage === 'string'
+    ? parseFloat(scanData.threatPercentage.replace('%', '')) || 0
+    : (scanData.threatPercentage || 0) * 100;
+
+  const normalizedThreatCategory = scanData.threatCategory.toLowerCase();
+  
+  const level =
+    normalizedThreatCategory === 'critical' ? 'High' :
+    normalizedThreatCategory === 'suspicious' ? 'Medium' : 'Low';
+
+  const ringColor =
+    level === 'High' ? '#FF0000' :
+    level === 'Medium' ? '#FFD700' : '#4CAF50';
+
+  const type =
+    normalizedThreatCategory === 'critical' ? 'Scam Alert' :
+    normalizedThreatCategory === 'suspicious' ? 'Potential Threat' : 'Legitimate';
+
   return (
     <View style={styles.container}>
-      {/* Top Navigation Bar */}
       <TopNavBar navigation={navigation} />
-
       <ScrollView contentContainerStyle={styles.contentContainer}>
         <View style={styles.titleContainer}>
-          <Text style={styles.title}>Phishing Attack</Text>
+          <Text style={styles.title}>{type}</Text>
           <View style={styles.badgeContainer}>
-            <Text style={styles.badgeText}>{threatLevel}</Text>
-            <ThreatLevelProgress progress={scamData.threatPercentage} />
+            <Text style={[styles.badgeText, { color: ringColor }]}>{scanData.threatCategory}</Text>
+            <ThreatLevelProgress progress={percent / 100} color={ringColor} />
           </View>
         </View>
 
-        {/* Scam Details Card */}
         <View style={styles.card}>
           <Text style={styles.boldText}>Alert Type:</Text>
-          <Text style={styles.infoText}>{scamData.type}</Text>
-
-          <Text style={styles.boldText}>Affected Platform:</Text>
-          <Text style={styles.infoText}>{scamData.platform}</Text>
-
-          <Text style={styles.boldText}>Suspicious URL:</Text>
-          <Text style={styles.infoText}>{scamData.url}</Text>
-
+          <Text style={styles.infoText}>{type}</Text>
+          <Text style={styles.boldText}>Input:</Text>
+          <Text style={styles.infoText}>{scanData.input}</Text>
           <Text style={styles.boldText}>Threat Level:</Text>
-          <Text style={styles.infoText}>{scamData.threatLevel}</Text>
-
+          <Text style={styles.infoText}>{level}</Text>
           <Text style={styles.boldText}>Description:</Text>
-          <Text style={styles.infoText}>{scamData.description}</Text>
-
-          <Text style={styles.boldText}>Indicators of Phishing:</Text>
-          {scamData.indicators.map((indicator, index) => (
-            <Text key={index} style={styles.infoText}>
-              - {indicator}
-            </Text>
+          <Text style={styles.infoText}>{scanData.description || 'No description provided.'}</Text>
+          {(scanData.indicators || []).map((item, i) => (
+            <Text key={i} style={styles.infoText}>• {item}</Text>
           ))}
-
-          <Text style={styles.boldText}>Recommended Actions:</Text>
-          {scamData.actions.map((action, index) => (
-            <Text key={index} style={styles.infoText}>
-              - {action}
-            </Text>
+          {(scanData.actions || []).map((item, i) => (
+            <Text key={i} style={styles.infoText}>• {item}</Text>
           ))}
         </View>
 
-        {/* Block & Report Button */}
-        <View style={styles.reportButtonContainer}>
-          <TouchableOpacity
-            style={styles.reportButton}
-            onPress={handleReportSubmit}
-            disabled={isSubmitting}>
-            <Text style={styles.reportButtonText}>
-              {isSubmitting ? 'Reporting...' : 'Block & Report'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={styles.reportButton}
+          onPress={handleReportSubmit}
+          disabled={isSubmitting}
+        >
+          <Text style={styles.reportButtonText}>
+            {isSubmitting ? 'Reporting...' : 'Block & Report'}
+          </Text>
+        </TouchableOpacity>
 
-        {/* Feedback Section */}
         <View style={styles.feedbackContainer}>
-          <Text style={styles.feedbackTitle}>Feedbacks</Text>
-          <Text style={styles.feedbackQuestion}>
-            Do you think this alert is valid or a false alarm?
-          </Text>
-          <Text style={styles.feedbackNote}>
-            Your feedback helps improve our detection system.
-          </Text>
+          <Text style={styles.feedbackTitle}>Feedback</Text>
+          <Text style={styles.feedbackQuestion}>Is this alert accurate?</Text>
           <View style={styles.feedbackButtons}>
             <TouchableOpacity onPress={() => handleFeedback(true)}>
               <Text style={styles.feedbackButtonTextLink}>Yes</Text>
@@ -184,34 +210,30 @@ const ReportScreen = ({navigation}) => {
         </View>
       </ScrollView>
 
-      {/* Feedback Modal */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => {
-          setModalVisible(!modalVisible);
-        }}>
+      <Modal transparent visible={modalVisible} animationType="slide">
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Thank you for your feedback</Text>
+            <Text style={styles.modalTitle}>Thanks!</Text>
             <Text style={styles.modalMessage}>{feedbackMessage}</Text>
-            <TouchableOpacity
+            <TouchableOpacity 
+              onPress={() => {
+                setModalVisible(false);
+                if (onGoBack) onGoBack(); // refresh parent list
+                navigation.goBack();
+              }}
               style={styles.modalButton}
-              onPress={() => setModalVisible(false)}>
-              <Text style={styles.modalButtonText}>Ok</Text>
+            >
+              <Text style={styles.modalButtonText}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* Bottom Navigation Bar */}
       <BottomNavBar navigation={navigation} />
     </View>
   );
 };
 
-/* Styles */
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -221,6 +243,33 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingHorizontal: 25,
     paddingBottom: 100,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    gap: 20,
+  },
+  errorText: {
+    color: 'red',
+    fontSize: 16,
+  },
+  backButton: {
+    backgroundColor: '#04366D',
+    padding: 10,
+    borderRadius: 5,
+    minWidth: 100,
+  },
+  backButtonText: {
+    color: 'white',
+    textAlign: 'center',
   },
   titleContainer: {
     flexDirection: 'row',
@@ -238,7 +287,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   badgeText: {
-    color: 'red',
     fontSize: 16,
     fontWeight: 'bold',
     marginRight: 10,
@@ -253,7 +301,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     fontSize: 10,
     fontWeight: 'bold',
-    color: 'red',
   },
   card: {
     backgroundColor: '#F0EEEE',
@@ -319,10 +366,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     marginLeft: 10,
-  },
-  feedbackNote: {
-    fontSize: 12,
-    color: '#333',
   },
   modalContainer: {
     flex: 1,

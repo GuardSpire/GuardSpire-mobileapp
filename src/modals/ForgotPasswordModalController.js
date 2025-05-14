@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, {useState} from 'react';
 import {
   View,
   Text,
@@ -8,17 +8,16 @@ import {
   StyleSheet,
   TouchableWithoutFeedback,
 } from 'react-native';
+import axios from 'axios';
 
-const ForgotPasswordModalController = ({ visible, onClose }) => {
+const ForgotPasswordModalController = ({visible, onClose}) => {
   const [step, setStep] = useState(1);
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [otpError, setOtpError] = useState(false);
-  const [passwordError, setPasswordError] = useState(false);
-
-  const correctOtp = '7890'; // Mock OTP for demonstration
+  const [otpError, setOtpError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
 
   const resetAll = () => {
     setStep(1);
@@ -26,26 +25,67 @@ const ForgotPasswordModalController = ({ visible, onClose }) => {
     setOtp('');
     setNewPassword('');
     setConfirmPassword('');
-    setOtpError(false);
-    setPasswordError(false);
+    setOtpError('');
+    setPasswordError('');
     onClose();
   };
 
-  const handleOtpVerify = () => {
-    if (otp === correctOtp) {
-      setOtpError(false);
-      setStep(3);
-    } else {
-      setOtpError(true);
+  const handleSendOtp = async () => {
+    try {
+      const response = await axios.post(
+        'http://localhost:5000/api/auth/forgot-password/request',
+        {email},
+      );
+      if (response.status === 200) {
+        setStep(2); // Proceed to OTP entry
+      }
+    } catch (error) {
+      console.error(
+        'Error sending OTP:',
+        error.response?.data?.error || error.message,
+      );
     }
   };
 
-  const handlePasswordReset = () => {
-    if (newPassword === confirmPassword) {
-      setPasswordError(false);
-      setStep(4);
-    } else {
-      setPasswordError(true);
+  const handleOtpVerify = async () => {
+    try {
+      const response = await axios.post(
+        'http://localhost:5000/api/auth/forgot-password/verify-otp',
+        {email, otp},
+      );
+      if (response.status === 200) {
+        setOtpError('');
+        setStep(3); // OTP verified → reset password
+      }
+    } catch (error) {
+      setOtpError(error.response?.data?.error || 'Invalid OTP');
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match');
+      return;
+    }
+
+    try {
+      const response = await axios.post(
+        'http://localhost:5000/api/auth/forgot-password/reset',
+        {
+          email,
+          newPassword,
+          confirmPassword,
+        },
+      );
+
+      if (response.status === 200) {
+        setPasswordError('');
+        setStep(4); // Success
+      } else {
+        setPasswordError(response.data?.error || 'Password reset failed');
+      }
+    } catch (error) {
+      setPasswordError(error.response?.data?.error || 'Password reset failed');
     }
   };
 
@@ -60,10 +100,7 @@ const ForgotPasswordModalController = ({ visible, onClose }) => {
               value={email}
               onChangeText={setEmail}
             />
-            <TouchableOpacity
-              style={styles.button}
-              onPress={() => setStep(2)}
-            >
+            <TouchableOpacity style={styles.button} onPress={handleSendOtp}>
               <Text style={styles.buttonText}>Send OTP</Text>
             </TouchableOpacity>
           </ModalView>
@@ -76,12 +113,10 @@ const ForgotPasswordModalController = ({ visible, onClose }) => {
               style={styles.input}
               value={otp}
               onChangeText={setOtp}
+              keyboardType="numeric"
             />
-            {otpError && <Text style={styles.error}>Invalid OTP</Text>}
-            <TouchableOpacity
-              style={styles.button}
-              onPress={handleOtpVerify}
-            >
+            {otpError ? <Text style={styles.error}>{otpError}</Text> : null}
+            <TouchableOpacity style={styles.button} onPress={handleOtpVerify}>
               <Text style={styles.buttonText}>Verify OTP</Text>
             </TouchableOpacity>
           </ModalView>
@@ -103,13 +138,12 @@ const ForgotPasswordModalController = ({ visible, onClose }) => {
               value={confirmPassword}
               onChangeText={setConfirmPassword}
             />
-            {passwordError && (
-              <Text style={styles.error}>Passwords do not match</Text>
-            )}
+            {passwordError ? (
+              <Text style={styles.error}>{passwordError}</Text>
+            ) : null}
             <TouchableOpacity
               style={styles.button}
-              onPress={handlePasswordReset}
-            >
+              onPress={handlePasswordReset}>
               <Text style={styles.buttonText}>Reset Password</Text>
             </TouchableOpacity>
           </ModalView>
@@ -139,7 +173,7 @@ const ForgotPasswordModalController = ({ visible, onClose }) => {
   );
 };
 
-const ModalView = ({ title, children }) => (
+const ModalView = ({title, children}) => (
   <View style={styles.modalBox}>
     {title && <Text style={styles.modalTitle}>{title}</Text>}
     {children}

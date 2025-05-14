@@ -19,6 +19,9 @@ import TopNavBar from '../components/TopNavBar';
 import BottomNavBar from '../components/BottomNavBar';
 import DeleteFlowModalController from '../modals/DeleteFlowModalController';
 import UpdateOtpFlowModal from '../modals/UpdateOtpFlowModal';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+import ForgotPasswordModalController from '../modals/ForgotPasswordModalController';
 
 const SettingsScreen = ({navigation}) => {
   const [profileImage, setProfileImage] = useState(null);
@@ -40,11 +43,31 @@ const SettingsScreen = ({navigation}) => {
   const [showDeleteModal, setShowDeleteModal] = useState(false); // State to control the delete modal
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otpTarget, setOtpTarget] = useState(null); // 'email' or 'password'
+  const [currentUsername, setCurrentUsername] = useState('');
+  const [newUsername, setNewUsername] = useState('');
+  const [usernameUpdateMsg, setUsernameUpdateMsg] = useState('');
+
+  const [currentEmail, setCurrentEmail] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [emailUpdateMsg, setEmailUpdateMsg] = useState('');
+
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordUpdateMsg, setPasswordUpdateMsg] = useState('');
+
+  const [otp, setOtp] = useState('');
+  const [otpType, setOtpType] = useState('');
+  const [otpMsg, setOtpMsg] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
 
   // **Handles Image Selection**
   const handleEditProfile = () => {
     launchImageLibrary({mediaType: 'photo', quality: 1}, response => {
-      if (response.didCancel) {return;}
+      if (response.didCancel) {
+        return;
+      }
       if (response.assets && response.assets.length > 0) {
         setProfileImage(response.assets[0].uri);
       }
@@ -96,43 +119,179 @@ const SettingsScreen = ({navigation}) => {
             setExpandedSection,
             () => (
               <View style={styles.sectionContent}>
+                {/* Username Update */}
                 <Text style={styles.label}>Current Username</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="Enter your current username"
+                  value={currentUsername}
+                  onChangeText={setCurrentUsername}
                 />
                 <Text style={styles.label}>New Username</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="Enter your new username"
+                  value={newUsername}
+                  onChangeText={setNewUsername}
                 />
                 <TouchableOpacity
                   style={styles.saveButton}
-                  onPress={() => {
-                    setShowOtpModal(true);
-                    setOtpTarget('username');
+                  onPress={async () => {
+                    try {
+                      const token = await AsyncStorage.getItem('token');
+                      console.log('Retrieved Token:', token);
+                      if (!token) {
+                        setUsernameUpdateMsg(
+                          'Error: Unauthorized. Please log in.',
+                        );
+                        return;
+                      }
+
+                      const headers = {Authorization: `Bearer ${token}`};
+                      const response = await axios.put(
+                        'http://localhost:5000/api/account/update-info', // Updated URL
+                        {currentUsername, newUsername},
+                        {headers},
+                      );
+
+                      if (response.status === 200) {
+                        setUsernameUpdateMsg('Username updated successfully!');
+                        setCurrentUsername('');
+                        setNewUsername('');
+                      } else {
+                        setUsernameUpdateMsg(
+                          response.data.error || 'Failed to update username.',
+                        );
+                      }
+                    } catch (error) {
+                      if (error.response && error.response.status === 401) {
+                        console.error(
+                          'Token expired or unauthorized. Redirecting to login.',
+                        );
+                        setUsernameUpdateMsg(
+                          'Session expired. Please log in again.',
+                        );
+                        // Redirect to login screen
+                        navigation.navigate('Login');
+                      } else {
+                        console.error('Error updating username:', error);
+                        setUsernameUpdateMsg(
+                          'An error occurred. Please try again.',
+                        );
+                      }
+                    }
                   }}>
                   <Text style={styles.saveText}>Save Changes</Text>
                 </TouchableOpacity>
+                {usernameUpdateMsg ? (
+                  <Text style={styles.feedbackMessage}>
+                    {usernameUpdateMsg}
+                  </Text>
+                ) : null}
 
+                {/* Email Update */}
                 <Text style={styles.label}>Current Email</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Enter your current email address"
+                  placeholder="Enter your current email"
+                  value={currentEmail}
+                  onChangeText={setCurrentEmail}
                 />
                 <Text style={styles.label}>New Email</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Enter your new email address"
+                  placeholder="Enter your new email"
+                  value={newEmail}
+                  onChangeText={setNewEmail}
                 />
                 <TouchableOpacity
                   style={styles.saveButton}
-                  onPress={() => {
-                    setOtpTarget('password');
-                    setShowOtpModal(true);
+                  onPress={async () => {
+                    try {
+                      const token = await AsyncStorage.getItem('token');
+                      if (!token) {
+                        setEmailUpdateMsg(
+                          'Error: Unauthorized. Please log in.',
+                        );
+                        return;
+                      }
+
+                      const headers = {Authorization: `Bearer ${token}`};
+                      const response = await axios.post(
+                        'http://localhost:5000/api/account/request-otp-update',
+                        {type: 'email'},
+                        {headers},
+                      );
+
+                      if (response.status === 200) {
+                        setOtpType('email');
+                        setOtpMsg('OTP sent for email update.');
+                      } else {
+                        setEmailUpdateMsg(
+                          response.data.error || 'Failed to request OTP.',
+                        );
+                      }
+                    } catch (error) {
+                      console.error('Error requesting OTP:', error);
+                      setEmailUpdateMsg('An error occurred. Please try again.');
+                    }
                   }}>
                   <Text style={styles.saveText}>Save Changes</Text>
                 </TouchableOpacity>
+                {emailUpdateMsg ? (
+                  <Text style={styles.feedbackMessage}>{emailUpdateMsg}</Text>
+                ) : null}
+
+                {/* OTP Verification */}
+                {otpType === 'email' && (
+                  <>
+                    <Text style={styles.label}>Enter OTP</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter OTP"
+                      value={otp}
+                      onChangeText={setOtp}
+                    />
+                    <TouchableOpacity
+                      style={styles.saveButton}
+                      onPress={async () => {
+                        try {
+                          const token = await AsyncStorage.getItem('token');
+                          if (!token) {
+                            setOtpMsg('Error: Unauthorized. Please log in.');
+                            return;
+                          }
+
+                          const headers = {Authorization: `Bearer ${token}`};
+                          const response = await axios.post(
+                            'http://localhost:5000/api/account/verify-update-otp',
+                            {otp, type: 'email', currentEmail, newEmail},
+                            {headers},
+                          );
+
+                          if (response.status === 200) {
+                            setOtpMsg('Email updated successfully!');
+                            setCurrentEmail('');
+                            setNewEmail('');
+                            setOtp('');
+                            setOtpType('');
+                          } else {
+                            setOtpMsg(
+                              response.data.error || 'Failed to verify OTP.',
+                            );
+                          }
+                        } catch (error) {
+                          console.error('Error verifying OTP:', error);
+                          setOtpMsg('An error occurred. Please try again.');
+                        }
+                      }}>
+                      <Text style={styles.saveText}>Verify OTP</Text>
+                    </TouchableOpacity>
+                    {otpMsg ? (
+                      <Text style={styles.feedbackMessage}>{otpMsg}</Text>
+                    ) : null}
+                  </>
+                )}
               </View>
             ),
           )}
@@ -145,22 +304,153 @@ const SettingsScreen = ({navigation}) => {
             () => (
               <View style={styles.sectionContent}>
                 <Text style={styles.label}>Current Password</Text>
-                <TextInput
-                  style={styles.input}
-                  secureTextEntry
-                  placeholder="Enter current password"
-                />
+                <View style={styles.passwordInputContainer}>
+                  <TextInput
+                    style={styles.inputWithoutBox} // Updated style for the input
+                    secureTextEntry={!showCurrentPassword} // Toggle visibility
+                    placeholder="Enter current password"
+                    value={currentPassword}
+                    onChangeText={setCurrentPassword}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowCurrentPassword(!showCurrentPassword)} // Toggle state
+                    style={styles.iconContainer} // Style to align the icon to the right
+                  >
+                    <Icon
+                      name={
+                        showCurrentPassword ? 'visibility' : 'visibility-off'
+                      } // FontAwesome icon
+                      size={20}
+                      color="black"
+                    />
+                  </TouchableOpacity>
+                </View>
+
                 <Text style={styles.label}>New Password</Text>
-                <TextInput
-                  style={styles.input}
-                  secureTextEntry
-                  placeholder="Enter new password"
-                />
+                <View style={styles.passwordInputContainer}>
+                  <TextInput
+                    style={styles.inputWithoutBox}
+                    secureTextEntry={!showNewPassword}
+                    placeholder="Enter new password"
+                    value={newPassword}
+                    onChangeText={setNewPassword}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowNewPassword(!showNewPassword)}
+                    style={styles.iconContainer}>
+                    <Icon
+                      name={showNewPassword ? 'visibility' : 'visibility-off'}
+                      size={20}
+                      color="black"
+                    />
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity
+                  style={styles.forgotPasswordButton}
+                  onPress={() => setShowForgotPasswordModal(true)} // Show modal
+                >
+                  <Text style={styles.forgotPasswordText}>
+                    Forgot Password?
+                  </Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity
                   style={styles.saveButton}
-                  onPress={() => setOtpModalVisible(true)}>
+                  onPress={async () => {
+                    try {
+                      const token = await AsyncStorage.getItem('token');
+                      if (!token) {
+                        setPasswordUpdateMsg(
+                          'Error: Unauthorized. Please log in.',
+                        );
+                        return;
+                      }
+
+                      const headers = {Authorization: `Bearer ${token}`};
+                      const response = await axios.post(
+                        'http://localhost:5000/api/account/request-otp-update',
+                        {type: 'password'},
+                        {headers},
+                      );
+
+                      if (response.status === 200) {
+                        setOtpType('password');
+                        setOtpMsg('OTP sent for password update.');
+                      } else {
+                        setPasswordUpdateMsg(
+                          response.data.error || 'Failed to request OTP.',
+                        );
+                      }
+                    } catch (error) {
+                      console.error('Error requesting OTP:', error);
+                      setPasswordUpdateMsg(
+                        'An error occurred. Please try again.',
+                      );
+                    }
+                  }}>
                   <Text style={styles.saveText}>Save Changes</Text>
                 </TouchableOpacity>
+                {passwordUpdateMsg ? (
+                  <Text style={styles.feedbackMessage}>
+                    {passwordUpdateMsg}
+                  </Text>
+                ) : null}
+
+                {/* OTP Verification */}
+                {otpType === 'password' && (
+                  <>
+                    <Text style={styles.label}>Enter OTP</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter OTP"
+                      value={otp}
+                      onChangeText={setOtp}
+                    />
+                    <TouchableOpacity
+                      style={styles.saveButton}
+                      onPress={async () => {
+                        try {
+                          const token = await AsyncStorage.getItem('token');
+                          if (!token) {
+                            setOtpMsg('Error: Unauthorized. Please log in.');
+                            return;
+                          }
+
+                          const headers = {Authorization: `Bearer ${token}`};
+                          const response = await axios.post(
+                            'http://localhost:5000/api/account/verify-update-otp',
+                            {
+                              otp,
+                              type: 'password',
+                              currentPassword,
+                              newPassword,
+                            },
+                            {headers},
+                          );
+
+                          if (response.status === 200) {
+                            setOtpMsg('Password updated successfully!');
+                            setCurrentPassword('');
+                            setNewPassword('');
+                            setOtp('');
+                            setOtpType('');
+                          } else {
+                            setOtpMsg(
+                              response.data.error || 'Failed to verify OTP.',
+                            );
+                          }
+                        } catch (error) {
+                          console.error('Error verifying OTP:', error);
+                          setOtpMsg('An error occurred. Please try again.');
+                        }
+                      }}>
+                      <Text style={styles.saveText}>Verify OTP</Text>
+                    </TouchableOpacity>
+                    {otpMsg ? (
+                      <Text style={styles.feedbackMessage}>{otpMsg}</Text>
+                    ) : null}
+                  </>
+                )}
               </View>
             ),
           )}
@@ -309,77 +599,27 @@ const SettingsScreen = ({navigation}) => {
                   We are really sorry to see you go. Are you sure you want to
                   delete your account? Once you confirm your data will be gone.
                 </Text>
+
                 <View style={styles.radioGroupDelete}>
-                  <View style={styles.radioOption}>
-                    <RadioButton
-                      value="noLongerUsing"
-                      status={
-                        deleteReason === 'noLongerUsing'
-                          ? 'checked'
-                          : 'unchecked'
-                      }
-                      onPress={() => setDeleteReason('noLongerUsing')}
-                      color="#04366D"
-                    />
-                    <Text style={styles.deleteLabel}>
-                      I am no longer using my account
-                    </Text>
-                  </View>
-                  <View style={styles.radioOption}>
-                    <RadioButton
-                      value="serviceNotGood"
-                      status={
-                        deleteReason === 'serviceNotGood'
-                          ? 'checked'
-                          : 'unchecked'
-                      }
-                      onPress={() => setDeleteReason('serviceNotGood')}
-                      color="#04366D"
-                    />
-                    <Text style={styles.deleteLabel}>
-                      The service is not good
-                    </Text>
-                  </View>
-                  <View style={styles.radioOption}>
-                    <RadioButton
-                      value="dontUnderstand"
-                      status={
-                        deleteReason === 'dontUnderstand'
-                          ? 'checked'
-                          : 'unchecked'
-                      }
-                      onPress={() => setDeleteReason('dontUnderstand')}
-                      color="#04366D"
-                    />
-                    <Text style={styles.deleteLabel}>
-                      I don't understand how to use
-                    </Text>
-                  </View>
-                  <View style={styles.radioOption}>
-                    <RadioButton
-                      value="dontNeed"
-                      status={
-                        deleteReason === 'dontNeed' ? 'checked' : 'unchecked'
-                      }
-                      onPress={() => setDeleteReason('dontNeed')}
-                      color="#04366D"
-                    />
-                    <Text style={styles.deleteLabel}>
-                      I don't need this app anymore
-                    </Text>
-                  </View>
-                  <View style={styles.radioOption}>
-                    <RadioButton
-                      value="other"
-                      status={
-                        deleteReason === 'other' ? 'checked' : 'unchecked'
-                      }
-                      onPress={() => setDeleteReason('other')}
-                      color="#04366D"
-                    />
-                    <Text style={styles.deleteLabel}>Other</Text>
-                  </View>
+                  {[
+                    { key: 'noLongerUsing', label: 'I am no longer using my account' },
+                    { key: 'serviceNotGood', label: 'The service is not good' },
+                    { key: 'dontUnderstand', label: "I don't understand how to use" },
+                    { key: 'dontNeed', label: "I don't need this app anymore" },
+                    { key: 'other', label: 'Other' },
+                  ].map(item => (
+                    <View style={styles.radioOption} key={item.key}>
+                      <RadioButton
+                        value={item.key}
+                        status={deleteReason === item.key ? 'checked' : 'unchecked'}
+                        onPress={() => setDeleteReason(item.key)}
+                        color="#04366D"
+                      />
+                      <Text style={styles.deleteLabel}>{item.label}</Text>
+                    </View>
+                  ))}
                 </View>
+
                 {deleteReason === 'other' && (
                   <TextInput
                     style={styles.input}
@@ -388,10 +628,42 @@ const SettingsScreen = ({navigation}) => {
                     onChangeText={setOtherReason}
                   />
                 )}
+
                 <TouchableOpacity
                   style={styles.saveButton}
-                  onPress={() => setShowDeleteModal(true)} // ✅ Launch modal
-                >
+                  onPress={async () => {
+                    try {
+                      const token = await AsyncStorage.getItem('token');
+                      if (!token) {
+                        alert('Authentication required');
+                        return;
+                      }
+
+                      const reason =
+                        deleteReason === 'other' && otherReason.trim() !== ''
+                          ? otherReason
+                          : deleteReason;
+
+                      const response = await axios.post(
+                        'http://localhost:5000/api/delete/reason',
+                        { reason },
+                        {
+                          headers: {
+                            Authorization: `Bearer ${token}`,
+                          },
+                        }
+                      );
+
+                      if (response.status === 200) {
+                        setShowDeleteModal(true);
+                      } else {
+                        alert(response.data.error || 'Failed to save reason.');
+                      }
+                    } catch (error) {
+                      console.error('Error saving delete reason:', error);
+                      alert('Something went wrong. Try again.');
+                    }
+                  }}>
                   <Text style={styles.saveText}>Confirm</Text>
                 </TouchableOpacity>
               </View>
@@ -507,6 +779,10 @@ const SettingsScreen = ({navigation}) => {
         skipOtp={otpTarget === 'username'} // skip OTP only for username
       />
 
+      <ForgotPasswordModalController
+        visible={showForgotPasswordModal}
+        onClose={() => setShowForgotPasswordModal(false)} // Close modal
+      />
     </View>
   );
 };
@@ -772,6 +1048,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row', // Align items horizontally
     alignItems: 'center', // Vertically center the radio button and text
     marginBottom: 10, // Add spacing between options
+  },
+  feedbackMessage: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#FF0000', // Red for errors
+    fontFamily: 'Poppins-Medium',
+  },
+  passwordInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    backgroundColor: '#fff', // Remove border and box styling
+  },
+  iconContainer: {
+    marginRight: 10, // Add spacing between the icon and the input
+  },
+
+  inputWithoutBox: {
+    flex: 1, // Take up the remaining space
+    padding: 10,
+    fontSize: 16,
+    color: '#000',
+  },
+  forgotPasswordButton: {
+    alignSelf: 'flex-end',
+    marginTop: 5,
+    marginBottom: 20,
+  },
+  forgotPasswordText: {
+    color: '#04366D',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });
 

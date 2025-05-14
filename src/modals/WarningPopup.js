@@ -6,7 +6,10 @@ import {
   TouchableOpacity,
   Image,
   StyleSheet,
+  Alert,
 } from 'react-native';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const WarningPopup = ({ visible, onClose, notificationData, navigation }) => {
   const [action, setAction] = useState('');
@@ -17,13 +20,46 @@ const WarningPopup = ({ visible, onClose, notificationData, navigation }) => {
   };
 
   const handleLearnMore = () => {
-    setTimeout(() => {
-      navigation.navigate('Report', {
-        scanId: notificationData?.scan_id,
-        spamData: notificationData,
-      });
-    }, 250);
+    navigation.navigate('Report', {
+      scanId: notificationData?.scan_id,
+      spamData: notificationData,
+    });
     onClose();
+  };
+
+  const getToken = async () => {
+    return await AsyncStorage.getItem('token');
+  };
+
+  const handleBlockAndReport = async () => {
+    try {
+      const token = await getToken();
+      const scanId = notificationData?.scan_id;
+
+      if (!scanId) {
+        Alert.alert("Scan ID missing");
+        return;
+      }
+
+      const response = await axios.post(
+        `http://localhost:5000/api/scan/manual/report/${scanId}/report`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      console.log("✅ Scan reported:", response.data);
+      Alert.alert("Reported", "Scan has been reported successfully.");
+      handleFullClose();
+    } catch (error) {
+      console.error("❌ Report failed:", error.response?.data || error.message);
+      Alert.alert("Error", "Failed to report scan.");
+    }
+  };
+
+  const handleAllow = () => {
+    // Optional: Send analytics or log scan as allowed
+    console.log("⚠️ User chose to allow the threat");
+    handleFullClose();
   };
 
   const config = {
@@ -32,42 +68,37 @@ const WarningPopup = ({ visible, onClose, notificationData, navigation }) => {
       message: 'This website may be unsafe. Are you sure you want to continue?',
       color: '#FFA000',
       icon: require('../assets/warning-yellow.png'),
+      confirm: handleBlockAndReport,
     },
     blockReport: {
       title: 'Warning!',
       message: 'This website may be unsafe. Are you sure you want to continue?',
       color: '#FFA000',
       icon: require('../assets/warning-yellow.png'),
+      confirm: handleBlockAndReport,
     },
     allow: {
       title: 'Warning!',
-      message:
-        'This website is flagged as a potential threat. Are you sure you want to continue?',
+      message: 'This website is flagged as a potential threat. Are you sure you want to continue?',
       color: '#D32F2F',
       icon: require('../assets/warning-red.png'),
+      confirm: handleAllow,
     },
   }[action];
 
   return (
-    <Modal
-      animationType="fade"
-      transparent={true}
-      visible={visible}
-      onRequestClose={onClose}
-    >
+    <Modal animationType="fade" transparent={true} visible={visible} onRequestClose={onClose}>
       <View style={styles.overlay}>
         {action ? (
           <View style={[styles.popupBox, { borderColor: config.color }]}>
             <Image source={config.icon} style={styles.icon} />
-            <Text style={[styles.title, { color: config.color }]}>
-              {config.title}
-            </Text>
+            <Text style={[styles.title, { color: config.color }]}>{config.title}</Text>
             <Text style={styles.message}>{config.message}</Text>
             <View style={styles.actionButtons}>
               <TouchableOpacity onPress={() => setAction('')}>
                 <Text style={[styles.link, { color: 'blue' }]}>Go Back</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleFullClose}>
+              <TouchableOpacity onPress={config.confirm}>
                 <Text style={[styles.link, { color: 'blue' }]}>
                   {action === 'allow' ? 'Allow Anyway' : 'Confirm'}
                 </Text>
@@ -77,9 +108,7 @@ const WarningPopup = ({ visible, onClose, notificationData, navigation }) => {
         ) : (
           <View style={styles.popupBox}>
             <Image source={require('../assets/Logo.png')} style={styles.icon} />
-            <Text style={[styles.title, { color: '#B00020' }]}>
-              Warning: Potential Threat Detected!
-            </Text>
+            <Text style={[styles.title, { color: '#B00020' }]}>Warning: Potential Threat Detected!</Text>
             <Text style={styles.message}>
               This content may steal your personal information or passwords.
               It's recommended to close this page immediately.
@@ -120,6 +149,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 400,
     alignItems: 'center',
+    borderWidth: 2,
   },
   icon: {
     width: 60,

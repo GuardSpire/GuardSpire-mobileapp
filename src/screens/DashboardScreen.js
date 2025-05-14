@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, {useState, useEffect, useCallback} from 'react';
 import {
   View,
   Text,
@@ -6,95 +6,126 @@ import {
   StyleSheet,
   ScrollView,
   AppState,
+  ActivityIndicator,
 } from 'react-native';
-import Svg, { Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
+import Svg, {Circle, Defs, LinearGradient, Stop} from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import TopNavBar from '../components/TopNavBar';
 import BottomNavBar from '../components/BottomNavBar';
 import NotificationAccessPrompt from '../components/NotificationAccessPrompt';
 import PermissionHelper from '../utils/PermissionHelper';
-import { useFocusEffect } from '@react-navigation/native';
+import {useFocusEffect} from '@react-navigation/native';
 
-const DashboardScreen = ({ navigation }) => {
+const DashboardScreen = ({navigation, route}) => {
   const [scanProgress, setScanProgress] = useState(0.85);
-  const [securityModel, setSecurityModel] = useState({ stable: 0, suspicious: 0, critical: 0 });
+  const [securityModel, setSecurityModel] = useState({
+    stable: 0,
+    suspicious: 0,
+    critical: 0,
+  });
   const [recentAlerts, setRecentAlerts] = useState([]);
   const [isBlocked, setIsBlocked] = useState(false);
   const [showAccessPrompt, setShowAccessPrompt] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshTrigger, setRefreshTrigger] = useState(false);
 
   const fetchDashboardData = async () => {
     try {
+      setIsLoading(true);
       const token = await AsyncStorage.getItem('token');
-      if (!token) {
-        console.error('No token found');
-        return;
-      }
-  
-      const headers = { Authorization: `Bearer ${token}` };
-  
-      // 1. Quick Scan
-      const quickRes = await axios.get('http://localhost:5000/api/dashboard/quick-scan', { headers });
-      const protection = (quickRes.data.protectionPercent || 0) / 100;
-      setScanProgress(protection);
-  
-      // 2. Security Model
-      const secRes = await axios.get('http://localhost:5000/api/dashboard/security-model', { headers });
-      setSecurityModel(secRes.data);
-  
-      // 3. Recent Alerts
-      const recentRes = await axios.get('http://localhost:5000/api/dashboard/recent-alerts', { headers });
-      setRecentAlerts(recentRes.data.recentAlerts || []);
-  
+      if (!token) return;
+
+      const headers = {Authorization: `Bearer ${token}`};
+
+      const [quickRes, secRes, recentRes] = await Promise.all([
+        axios.get('http://localhost:5000/api/dashboard/quick-scan', {headers}),
+        axios.get('http://localhost:5000/api/dashboard/security-model', {
+          headers,
+        }),
+        axios.get('http://localhost:5000/api/dashboard/recent-alerts', {
+          headers,
+        }),
+      ]);
+
+      setScanProgress((quickRes.data.protectionPercent || 0) / 100);
+      setSecurityModel({
+        stable: secRes.data.stable || 0,
+        suspicious: secRes.data.suspicious || 0,
+        critical: secRes.data.critical || 0,
+      });
+      setRecentAlerts(
+        recentRes.data.recentAlerts?.filter(alert => !alert.deleted) || [],
+      );
     } catch (error) {
-      console.error('Failed to fetch dashboard:', error?.response?.data || error.message);
+      console.error(
+        'Dashboard load failed:',
+        error?.response?.data || error.message,
+      );
     } finally {
       setIsLoading(false);
     }
-  };  
+  };
 
-  const checkNotificationAccess = useCallback(async (forceCheck = false) => {
-    console.log('[ACCESS] Checking notification access', { forceCheck });
-    setIsLoading(true);
-    try {
-      const hasAccess = await PermissionHelper.checkNotificationAccess(forceCheck);
+  const handleAllowAccess = async () => {
+    setShowAccessPrompt(false);
+    const granted = await PermissionHelper.requestNotificationAccess(); // opens settings
+    if (granted) {
+      const hasAccess = await checkNotificationAccess(true);
       setShowAccessPrompt(!hasAccess);
       setIsBlocked(!hasAccess);
+    }
+  };
+
+  const checkNotificationAccess = useCallback(async (forceCheck = false) => {
+    try {
+      const hasAccess = await PermissionHelper.checkNotificationAccess(
+        forceCheck,
+      );
+      setShowAccessPrompt(!hasAccess);
+      setIsBlocked(!hasAccess);
+
+      // Add debug log
+      console.log('[DEBUG] showAccessPrompt:', !hasAccess);
+
       return hasAccess;
     } catch (error) {
-      console.error('[ACCESS] Error checking notification:', error);
+      console.error('Notification permission check failed:', error);
       return false;
-    } finally {
-      setIsLoading(false);
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      console.log('[NAV] Screen focused - Fetching dashboard');
       fetchDashboardData();
-      checkNotificationAccess(true);
-    }, [checkNotificationAccess])
+      checkNotificationAccess();
+    }, [refreshTrigger]),
   );
 
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', async (state) => {
-      if (state === 'active') {
-        console.log('[APP] App active - rechecking access');
-        await checkNotificationAccess(true);
-      }
-    });
-    return () => subscription.remove();
+    const interval = setInterval(() => {
+      checkNotificationAccess(); // This will update showAccessPrompt and isBlocked
+    }, 5000); // every 5 seconds
+
+    return () => clearInterval(interval);
   }, [checkNotificationAccess]);
 
   const handleQuickScan = async () => {
+    setIsLoading(true);
     await fetchDashboardData();
   };
+
+  useEffect(() => {
+    if (route.params?.refresh) {
+      fetchDashboardData();
+      navigation.setParams({refresh: false});
+    }
+  }, [route.params?.refresh]);
 
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#04366D" />
         <Text>Loading dashboard...</Text>
       </View>
     );
@@ -104,8 +135,6 @@ const DashboardScreen = ({ navigation }) => {
     <View style={styles.container}>
       <TopNavBar navigation={navigation} />
       <ScrollView contentContainerStyle={styles.contentContainer}>
-
-        {/* Quick Scan Progress */}
         <View style={[styles.card, styles.centerContent]}>
           <View style={styles.circleWrapper}>
             <CircularProgress progress={scanProgress} />
@@ -118,61 +147,93 @@ const DashboardScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
-        {/* Security Model */}
         <Text style={styles.sectionTitle}>Security Model Integrity</Text>
         <View style={styles.card}>
-          {[
-            { label: 'Stable', color: 'green', percent: securityModel.stable },
-            { label: 'Suspicious', color: 'yellow', percent: securityModel.suspicious },
-            { label: 'Critical', color: 'red', percent: securityModel.critical },
-          ].map(({ label, color, percent }) => (
-            <View style={styles.statusRow} key={label}>
-              <Text style={styles.statusText}>{label}</Text>
-              <View style={styles.bar}>
-                <View
-                  style={[
-                    styles.progressBar,
-                    { width: `${percent}%`, backgroundColor: color },
-                  ]}
-                />
+          {['stable', 'suspicious', 'critical'].map((key, i) => {
+            const label = key.charAt(0).toUpperCase() + key.slice(1);
+            const color =
+              key === 'critical'
+                ? '#FF0000'
+                : key === 'suspicious'
+                ? '#FFD700'
+                : '#4CAF50';
+            const value = securityModel[key] || 0;
+            return (
+              <View style={styles.statusRow} key={i}>
+                <Text style={styles.statusText}>{label}</Text>
+                <View style={styles.bar}>
+                  <View
+                    style={[
+                      styles.progressBar,
+                      {
+                        width: `${Math.max(value, value > 0 ? 1 : 0)}%`,
+                        backgroundColor: color,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.statusPercent}>{value}%</Text>
               </View>
-              <Text style={styles.statusPercent}>{percent}%</Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
 
-        {/* Recent Scam Alerts */}
         <Text style={styles.sectionTitle}>Recent Scam Alerts</Text>
-          <View style={styles.card}>
-            {recentAlerts.length > 0 ? (
-              recentAlerts.map((alert, index) => {
-                const { platform = 'Unknown', threatPercentage = 0, threatLevel = 'stable' } = alert;
-                const color = threatLevel === 'critical' ? 'red' : threatLevel === 'suspicious' ? 'orange' : 'green';
-                return (
-                  <TouchableOpacity
-                    key={index}
-                    style={styles.alertRow}
-                    onPress={() => !isBlocked && navigation.navigate('Report', { alert })}
-                    disabled={isBlocked}>
-                    <Text style={styles.alertText}>{platform}</Text>
-                    <View style={styles.bar}>
-                      <View
-                        style={[
-                          styles.progressBar,
-                          { width: `${Math.min(threatPercentage, 100)}%`, backgroundColor: color },
-                        ]}
-                      />
-                    </View>
-                    <Text style={styles.alertPercent}>{`${threatPercentage}%`}</Text>
-                  </TouchableOpacity>
-                );
-              })
-            ) : (
-              <Text style={{ textAlign: 'center', marginTop: 10 }}>No recent alerts</Text>
-            )}
-          </View>
+        <View style={styles.card}>
+          {recentAlerts.length > 0 ? (
+            recentAlerts.map((alert, index) => {
+              const {
+                platform = 'Unknown',
+                threatPercentage = 0,
+                threatLevel = 'stable',
+                scan_id,
+                input,
+              } = alert;
+              const color =
+                threatLevel === 'critical'
+                  ? '#FF0000'
+                  : threatLevel === 'suspicious'
+                  ? '#FFD700'
+                  : '#4CAF50';
 
+              return (
+                <TouchableOpacity
+                  key={`${scan_id}-${index}`}
+                  style={styles.alertRow}
+                  onPress={() =>
+                    !isBlocked &&
+                    navigation.navigate('Report', {
+                      scanId: scan_id,
+                      threatCategory: threatLevel,
+                      input: input,
+                      onGoBack: () => setRefreshTrigger(prev => !prev),
+                    })
+                  }
+                  disabled={isBlocked}>
+                  <Text style={styles.alertText}>{platform}</Text>
+                  <View style={styles.bar}>
+                    <View
+                      style={[
+                        styles.progressBar,
+                        {
+                          width: `${Math.max(threatPercentage, 1)}%`,
+                          backgroundColor: color,
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.alertPercent}>{threatPercentage}%</Text>
+                </TouchableOpacity>
+              );
+            })
+          ) : (
+            <Text style={{textAlign: 'center', marginTop: 10}}>
+              No recent alerts
+            </Text>
+          )}
+        </View>
       </ScrollView>
+
       <BottomNavBar
         navigation={navigation}
         onQuickScan={handleQuickScan}
@@ -181,13 +242,13 @@ const DashboardScreen = ({ navigation }) => {
       <NotificationAccessPrompt
         visible={showAccessPrompt}
         onClose={() => setShowAccessPrompt(false)}
-        onAllowAccess={handleQuickScan}
+        onAllowAccess={handleAllowAccess}
       />
     </View>
   );
 };
 
-const CircularProgress = ({ progress }) => {
+const CircularProgress = ({progress}) => {
   const size = 160;
   const strokeWidth = 20;
   const center = size / 2;
@@ -229,7 +290,6 @@ const CircularProgress = ({ progress }) => {
     </View>
   );
 };
-
 
 const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: '#fff'},
@@ -317,40 +377,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
   },
-  blockerOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  blockerText: {
-    color: 'white',
-    fontSize: 20,
-    textAlign: 'center',
-    fontWeight: 'bold',
-    marginBottom: 20,
-  },
-  enableButton: {
-    backgroundColor: '#04366D',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 5,
-    marginTop: 20,
-  },
-  enableButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 10,
   },
 });
 

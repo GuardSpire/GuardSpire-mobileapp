@@ -1,14 +1,10 @@
-// src/utils/PermissionHelper.js
-import { NativeModules, Platform } from 'react-native';
+import { NativeModules, Platform, Linking } from 'react-native';
 const { NotificationAccessChecker } = NativeModules;
-
-let lastKnownState = null;
 
 export default {
   async checkNotificationAccess(forceCheck = false) {
     console.log('[PERM] Checking notification access', { forceCheck });
     if (Platform.OS !== 'android') {
-      console.log('[PERM] Not Android, skipping check');
       return true;
     }
 
@@ -30,18 +26,18 @@ export default {
   async requestNotificationAccess() {
     console.log('[PERM] Requesting access');
     if (Platform.OS !== 'android') {
-      console.log('[PERM] Not Android, skipping request');
       return false;
     }
 
     try {
-      if (!NotificationAccessChecker?.openNotificationAccessSettings) {
-        console.error('[PERM] Native module not linked properly');
-        return false;
+      // First try the direct method
+      if (NotificationAccessChecker?.openNotificationAccessSettings) {
+        await NotificationAccessChecker.openNotificationAccessSettings();
+        return true;
       }
 
-      await NotificationAccessChecker.openNotificationAccessSettings();
-      console.log('[PERM] Settings opened successfully');
+      // Fallback to generic intent
+      await Linking.openURL('android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS');
       return true;
     } catch (error) {
       console.error('[PERM] Failed to open settings:', error);

@@ -1,65 +1,138 @@
-import React, { useState } from 'react';
-import {View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList} from 'react-native';
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  FlatList,
+  ActivityIndicator,
+} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import TopNavBar from '../components/TopNavBar';
 import BottomNavBar from '../components/BottomNavBar';
+import axios from 'axios';
+import moment from 'moment';
 
 const HistoryScreen = ({ navigation }) => {
   const [selectedFilter, setSelectedFilter] = useState('Daily');
-  const [historyData, setHistoryData] = useState([
-    { id: 1, type: 'Phishing Attack', percentage: '100%', date: 'Today' },
-    { id: 2, type: 'Job Scam', percentage: '85%', date: 'Today' },
-    { id: 3, type: 'Sampath Bank', percentage: '60%', date: 'Today' },
-    { id: 4, type: 'Phishing Attack', percentage: '100%', date: 'March 12' },
-    { id: 5, type: 'Job Scam', percentage: '85%', date: 'March 10' },
-    { id: 6, type: 'Sampath Bank', percentage: '60%', date: 'March 9' },
-  ]);
+  const [fullHistory, setFullHistory] = useState([]);
+  const [filteredHistory, setFilteredHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Available filters
   const filters = ['Daily', 'Weekly', 'Monthly', 'Yearly'];
 
-  // Handle filtering
-  const applyFilter = (filterType) => {
-    setSelectedFilter(filterType);
-    // TODO: Apply filtering logic based on the selected filter (e.g., fetch data for that period)
+  const fetchHistory = async () => {
+    try {
+      setLoading(true);
+      const token = await AsyncStorage.getItem('token');
+      const headers = { Authorization: `Bearer ${token}` };
+      const res = await axios.get('http://localhost:5000/api/scan/history', { headers });
+
+      const normalizedHistory = (res.data.history || []).map(item => ({
+        ...item,
+        threatPercentage: item.confidence || 0,
+        scan_id: item.scan_id || item._id,
+        threatCategory: item.threatCategory || 'Legitimate'
+      }));
+
+      setFullHistory(normalizedHistory);
+      applyFilter(selectedFilter, normalizedHistory);
+    } catch (error) {
+      console.error('Failed to load history:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Render each detected threat item
-  const renderItem = ({ item }) => (
-    <TouchableOpacity
-      style={styles.threatItem}
-      onPress={() => navigation.navigate('Report')}
-    >
-      <Text style={styles.threatText}>{item.type}</Text>
-      <Text style={styles.threatPercentage}>{item.percentage}</Text>
-    </TouchableOpacity>
-  );
+  useEffect(() => {
+    fetchHistory();
+    const unsubscribe = navigation.addListener('focus', () => {
+      fetchHistory();
+    });
+    return unsubscribe;
+  }, [navigation]);
+
+  const applyFilter = (filterType, history = fullHistory) => {
+    setSelectedFilter(filterType);
+    const now = moment();
+    let filtered = [];
+
+    switch (filterType) {
+      case 'Daily':
+        filtered = history.filter(item => moment(item.timestamp).isSame(now, 'day'));
+        break;
+      case 'Weekly':
+        filtered = history.filter(item => moment(item.timestamp).isAfter(now.clone().subtract(7, 'days')));
+        break;
+      case 'Monthly':
+        filtered = history.filter(item => moment(item.timestamp).isSame(now, 'month'));
+        break;
+      case 'Yearly':
+        filtered = history.filter(item => moment(item.timestamp).isSame(now, 'year'));
+        break;
+      default:
+        filtered = history;
+    }
+
+    setFilteredHistory(filtered);
+  };
+
+  const renderItem = ({ item }) => {
+    return (
+      <TouchableOpacity
+        style={styles.threatItem}
+        onPress={() => navigation.navigate('Report', {
+          scanId: item.scan_id,
+          threatPercentage: item.threatPercentage,
+          threatCategory: item.threatCategory
+        })}
+      >
+        <Text style={styles.threatText}>{item.platform || 'Unknown'}</Text>
+        <Text style={styles.threatPercentage}>
+          {item.threatPercentage}%
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#04366D" />
+        <Text>Loading history...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      {/* Top Navigation Bar */}
       <TopNavBar navigation={navigation} />
-
       <ScrollView contentContainerStyle={styles.contentContainer}>
         <Text style={styles.sectionTitle}>Detected Threats</Text>
 
-        {/* Recent Threats Section */}
         <Text style={styles.subTitle}>Recents</Text>
         <View style={styles.threatCard}>
-          {historyData
-            .filter((item) => item.date === 'Today')
-            .map((item) => (
+          {fullHistory
+            .filter(item => moment(item.timestamp).isSame(moment(), 'day'))
+            .map(item => (
               <TouchableOpacity
-                key={item.id}
+                key={item.scan_id}
                 style={styles.threatItem}
-                onPress={() => navigation.navigate('Report')}
+                onPress={() => navigation.navigate('Report', {
+                  scanId: item.scan_id,
+                  threatPercentage: item.threatPercentage,
+                  threatCategory: item.threatCategory
+                })}
               >
-                <Text style={styles.threatText}>{item.type}</Text>
-                <Text style={styles.threatPercentage}>{item.percentage}</Text>
+                <Text style={styles.threatText}>{item.platform || 'Unknown'}</Text>
+                <Text style={styles.threatPercentage}>
+                  {item.threatPercentage}%
+                </Text>
               </TouchableOpacity>
             ))}
         </View>
 
-        {/* History Section */}
         <View style={styles.historyHeader}>
           <Text style={styles.subTitle}>History</Text>
           <TouchableOpacity style={styles.filterButton}>
@@ -67,9 +140,8 @@ const HistoryScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
-        {/* Filter Options */}
         <View style={styles.filterContainer}>
-          {filters.map((filter) => (
+          {filters.map(filter => (
             <TouchableOpacity
               key={filter}
               style={[
@@ -90,28 +162,28 @@ const HistoryScreen = ({ navigation }) => {
           ))}
         </View>
 
-        {/* Threat History List */}
         <View style={styles.threatCard}>
-          <FlatList
-            data={historyData}
-            keyExtractor={(item) => item.id.toString()}
-            renderItem={renderItem}
-            scrollEnabled={false}
-          />
+          {filteredHistory.length > 0 ? (
+            <FlatList
+              data={filteredHistory}
+              keyExtractor={(item) => item.scan_id}
+              renderItem={renderItem}
+              scrollEnabled={false}
+            />
+          ) : (
+            <Text style={styles.emptyText}>No threats found for this period</Text>
+          )}
         </View>
       </ScrollView>
-
-      {/* Bottom Navigation Bar */}
       <BottomNavBar navigation={navigation} />
     </View>
   );
 };
 
-/* Styles */
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
+  container: { flex: 1, backgroundColor: '#fff' },
+  loadingContainer: {
+    flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10,
   },
   contentContainer: {
     paddingTop: 20,
@@ -191,8 +263,13 @@ const styles = StyleSheet.create({
   },
   threatPercentage: {
     fontSize: 14,
-    color: 'red',
     fontWeight: 'bold',
+    color: '#000000',
+  },
+  emptyText: {
+    textAlign: 'center',
+    marginTop: 10,
+    color: '#666',
   },
 });
 
