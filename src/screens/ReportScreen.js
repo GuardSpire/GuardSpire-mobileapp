@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  Alert, Modal, ActivityIndicator,
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Alert,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -9,7 +15,7 @@ import TopNavBar from '../components/TopNavBar';
 import BottomNavBar from '../components/BottomNavBar';
 
 const ReportScreen = ({ navigation, route }) => {
-  const { scanId, threatCategory: initialThreatCategory, input, onGoBack } = route.params || {};
+  const { scanId, input, onGoBack } = route.params || {};
   const [scanData, setScanData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -19,7 +25,6 @@ const ReportScreen = ({ navigation, route }) => {
   useEffect(() => {
     const fetchReport = async () => {
       if (!scanId) return;
-
       setLoading(true);
       try {
         const token = await AsyncStorage.getItem('token');
@@ -29,18 +34,10 @@ const ReportScreen = ({ navigation, route }) => {
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || 'Failed to fetch');
 
-        const normalizedThreatCategory = initialThreatCategory || 
-                                      data.threatCategory || 
-                                      'Stable';
-        
-        const normalizedData = {
+        setScanData({
           ...data,
           input: input || data.input,
-          threatCategory: normalizedThreatCategory.charAt(0).toUpperCase() + 
-                         normalizedThreatCategory.slice(1).toLowerCase()
-        };
-        
-        setScanData(normalizedData);
+        });
       } catch (e) {
         console.error(e);
         Alert.alert('Error', 'Failed to load scan report.');
@@ -50,7 +47,7 @@ const ReportScreen = ({ navigation, route }) => {
     };
 
     fetchReport();
-  }, [scanId, initialThreatCategory, input]);
+  }, [scanId, input]);
 
   const handleReportSubmit = async () => {
     if (!scanId) return;
@@ -69,8 +66,6 @@ const ReportScreen = ({ navigation, route }) => {
 
       setFeedbackMessage('Scam has been successfully reported and blocked.');
       setModalVisible(true);
-
-      // 🔄 Trigger refresh in parent component
       if (onGoBack) onGoBack();
     } catch (err) {
       Alert.alert('Error', err.message);
@@ -139,23 +134,15 @@ const ReportScreen = ({ navigation, route }) => {
   if (loading) return <ActivityIndicator style={{ flex: 1 }} size="large" color="#04366D" />;
   if (!scanData) return <Text>Scan data not available</Text>;
 
-  const percent = typeof scanData.threatPercentage === 'string'
-    ? parseFloat(scanData.threatPercentage.replace('%', '')) || 0
-    : (scanData.threatPercentage || 0) * 100;
+  const percent =
+    typeof scanData.threatPercentage === 'string'
+      ? parseFloat(scanData.threatPercentage.replace('%', '')) || 0
+      : (scanData.threatPercentage || 0) * 100;
 
-  const normalizedThreatCategory = scanData.threatCategory.toLowerCase();
-  
-  const level =
-    normalizedThreatCategory === 'critical' ? 'High' :
-    normalizedThreatCategory === 'suspicious' ? 'Medium' : 'Low';
-
-  const ringColor =
-    level === 'High' ? '#FF0000' :
-    level === 'Medium' ? '#FFD700' : '#4CAF50';
-
-  const type =
-    normalizedThreatCategory === 'critical' ? 'Scam Alert' :
-    normalizedThreatCategory === 'suspicious' ? 'Potential Threat' : 'Legitimate';
+  const category = scanData.threatCategory?.toLowerCase() || 'legitimate';
+  const type = category === 'critical' ? 'Scam Alert' : category === 'suspicious' ? 'Potential Threat' : 'Legitimate';
+  const level = category === 'critical' ? 'High' : category === 'suspicious' ? 'Medium' : 'Low';
+  const ringColor = level === 'High' ? '#FF0000' : level === 'Medium' ? '#FFD700' : '#4CAF50';
 
   return (
     <View style={styles.container}>
@@ -172,18 +159,33 @@ const ReportScreen = ({ navigation, route }) => {
         <View style={styles.card}>
           <Text style={styles.boldText}>Alert Type:</Text>
           <Text style={styles.infoText}>{type}</Text>
+
           <Text style={styles.boldText}>Input:</Text>
           <Text style={styles.infoText}>{scanData.input}</Text>
+
           <Text style={styles.boldText}>Threat Level:</Text>
           <Text style={styles.infoText}>{level}</Text>
+
           <Text style={styles.boldText}>Description:</Text>
           <Text style={styles.infoText}>{scanData.description || 'No description provided.'}</Text>
-          {(scanData.indicators || []).map((item, i) => (
-            <Text key={i} style={styles.infoText}>• {item}</Text>
-          ))}
-          {(scanData.actions || []).map((item, i) => (
-            <Text key={i} style={styles.infoText}>• {item}</Text>
-          ))}
+
+          {Array.isArray(scanData.indicators) && scanData.indicators.length > 0 && (
+            <>
+              <Text style={styles.boldText}>Indicators:</Text>
+              {scanData.indicators.map((item, i) => (
+                <Text key={`indicator-${i}`} style={styles.infoText}>• {item}</Text>
+              ))}
+            </>
+          )}
+
+          {Array.isArray(scanData.actions) && scanData.actions.length > 0 && (
+            <>
+              <Text style={styles.boldText}>Recommended Actions:</Text>
+              {scanData.actions.map((item, i) => (
+                <Text key={`action-${i}`} style={styles.infoText}>• {item}</Text>
+              ))}
+            </>
+          )}
         </View>
 
         <TouchableOpacity
@@ -215,10 +217,10 @@ const ReportScreen = ({ navigation, route }) => {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Thanks!</Text>
             <Text style={styles.modalMessage}>{feedbackMessage}</Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={() => {
                 setModalVisible(false);
-                if (onGoBack) onGoBack(); // refresh parent list
+                if (onGoBack) onGoBack();
                 navigation.goBack();
               }}
               style={styles.modalButton}

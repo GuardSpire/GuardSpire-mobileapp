@@ -8,7 +8,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  ActivityIndicator,
 } from 'react-native';
 import { StyleSheet } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
@@ -41,34 +40,45 @@ const ManualScannerScreen = ({ navigation }) => {
 
     try {
       const token = await AsyncStorage.getItem('token');
-      
-      const response = await axios.post(
+
+      const scanResponse = await axios.post(
         'http://localhost:5000/api/scan/manual',
         { input: scanText },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      const data = response.data;
-      setLastScanId(data.scan_id);
+      const { scan_id } = scanResponse.data;
+      setLastScanId(scan_id);
+
+      const reportResponse = await axios.get(
+        `http://localhost:5000/api/scan/manual/report/${scan_id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      const reportData = reportResponse.data;
 
       clearInterval(interval);
       setIsScanning(false);
       setScanProgress(1);
       setScanComplete(true);
 
-      const threat = data.combined_threat || data.text_analysis || {};
-      const normalizedThreatCategory = threat.category || 'Stable';
+      const category = reportData.threatCategory || 'Legitimate';
+      const threatType = category === 'Critical' ? 'Scam Alert'
+                        : category === 'Suspicious' ? 'Potential Threat'
+                        : 'Legitimate';
+      const threatLevelValue = category === 'Critical' ? 'High'
+                            : category === 'Suspicious' ? 'Medium'
+                            : 'Low';
+      const threatPercent = typeof reportData.threatPercentage === 'string'
+        ? parseFloat(reportData.threatPercentage.replace('%', ''))
+        : reportData.threatPercentage;
 
       setThreatLevel({
-        type: normalizedThreatCategory === 'Critical' ? 'Scam Alert' :
-              normalizedThreatCategory === 'Suspicious' ? 'Potential Threat' : 'Legitimate',
-        level: normalizedThreatCategory === 'Critical' ? 'High' :
-               normalizedThreatCategory === 'Suspicious' ? 'Medium' : 'Low',
-        status: normalizedThreatCategory,
-        percentage: parseFloat(threat.confidence?.toString().replace('%', '') || '0').toFixed(0),
-        description: threat.description || 'No description provided.',
-        indicators: threat.indicators || [],
-        actions: threat.actions || []
+        type: threatType,
+        level: threatLevelValue,
+        status: category,
+        percentage: (threatPercent * 100).toFixed(0),
+        description: reportData.description || 'No description available.'
       });
 
     } catch (error) {
@@ -169,19 +179,13 @@ const ManualScannerScreen = ({ navigation }) => {
                 <Text style={styles.detailsText}>
                   <Text style={styles.boldText}>Description:</Text> {threatLevel.description}
                 </Text>
-                {threatLevel.indicators.map((item, i) => (
-                  <Text key={i} style={styles.detailsText}>• {item}</Text>
-                ))}
-                {threatLevel.actions.map((item, i) => (
-                  <Text key={i} style={styles.detailsText}>• {item}</Text>
-                ))}
               </View>
 
               <TouchableOpacity
                 style={styles.moreDetailsButton}
                 onPress={() => {
                   if (lastScanId) {
-                    navigation.navigate('Report', { 
+                    navigation.navigate('Report', {
                       scanId: lastScanId,
                       threatCategory: threatLevel.status,
                       threatPercentage: threatLevel.percentage
@@ -217,8 +221,6 @@ const ThreatLevelProgress = ({ progress, level }) => {
     return '#4CAF50';
   };
 
-  const circleColor = getThreatColor();
-
   return (
     <View style={styles.circularProgressContainerThreatLevel}>
       <Svg width={size} height={size}>
@@ -234,7 +236,7 @@ const ThreatLevelProgress = ({ progress, level }) => {
           cx={center}
           cy={center}
           r={radius}
-          stroke={circleColor}
+          stroke={getThreatColor()}
           strokeWidth={strokeWidth}
           fill="none"
           strokeDasharray={circumference}
@@ -244,7 +246,7 @@ const ThreatLevelProgress = ({ progress, level }) => {
           origin={`${center}, ${center}`}
         />
       </Svg>
-      <Text style={[styles.progressText, { color: circleColor }]}>
+      <Text style={[styles.progressText, { color: getThreatColor() }]}>
         {Math.round(progress * 100)}%
       </Text>
     </View>
